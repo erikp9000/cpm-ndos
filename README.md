@@ -164,7 +164,7 @@ Where:
 
 Find the first file matching the NAMEx8 and EXTx3 parameters. The FCBhi,FCBlo values 
 are the actual address of the File Control Block on the client. The server uses this
- value to correlate the open files/directory on the server with the FCB in the client.
+value to correlate the open files/directory on the server with the FCB in the client.
 
 Request:
 
@@ -191,6 +191,7 @@ Response:
 
 	
 The file size is returned in S2, EX, and RC as a count of 128-byte blocks, where:
+
 	- S2=file size / 524288 *[0-15, 4 bits]*
 	- EX=(file size % 524288) / 16384 *[0-31, 5 bits]*
 	- RC=(file size % 16384) / 128 *[0-127, 7 bits]*
@@ -209,111 +210,253 @@ first EXT byte is set to 1. The system/hidden file type (most-significant bit of
 second EXT byte) is not supported.
 
 
-Find Next (04h)
+#### Find Next
+
 Find the next file matching the search parameters specified in Find First.
+
 Request:
-	CMD: 04h
-	DATA:  |FCBlo|FCBhi|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 04h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+
 Response:
-	CMD: 05h
-	DATA: Same as Find First
-Open File (06h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 05h | ... | Same as Find First |
+
+#### Open File
+
 Open the named file on the server for reading and writing. If the file does not exist, an error is returned.
+The server will look for the file in the current working directory first. If not found, then the server
+will search the directories configured in the path configuration.
+
 Request:
-	CMD: 06h
-	DATA:  |FCBlo|FCBhi|NAMEx8|EXTx3|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 06h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | NAMEx8| File name with optional wildcard character '?' |
+|     | EXTx3 | File extension with optional wildcard character '?' | 
+
 Response:
-	CMD: 07h
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success) or 0FFh (not found).
-Close File (08h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 07h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=not found |
+
+
+#### Close File
+
 Close the file referenced by FBChi,FCBlo. 
+
 Request:
-	CMD: 08h
-	DATA: |FCBlo|FCBhi|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 08h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+
 Response:
-	CMD: 09h
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success) or 0FFh (error).
-Delete File (0ah)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 09h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=not found |
+
+#### Delete File
+
 Delete the named file on the server.
+
 Request:
-	CMD: 0ah
-	DATA:  |FCBlo|FCBhi|NAMEx8|EXTx3|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0ah | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | NAMEx8| File name |
+|     | EXTx3 | File extension | 
+
 Response:
-	CMD: 0bh
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success) or 0FFh (not found/access denied/etc.).
-Read File (0ch)
-Read the 128-byte block of a previously opened file starting at the offset specified by Rechi,Reclo. If Rechi,Reclo is not specified, read the next 128-byte block. The last partial 128-byte block at the end of the file is automatically filled with CTRL-Z characters.
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0bh | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=not found/access denied/etc. |
+
+
+#### Read File
+
+Read the 128-byte block of a previously opened file starting at the offset specified by 
+Rechi,Reclo. If Rechi,Reclo is not specified, read the next 128-byte block. The last 
+partial 128-byte block at the end of the file is automatically filled with CTRL-Z 
+characters.
+
+**NOTE** If Reclo is provided, then Rechi MUST be provided.
+
 Request:
-	CMD: 0ch
-	DATA: |FCBlo|FCBhi|[Reclo|Rechi|]
-Where Rechi,Reclo is the 128-byte record offset.
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0ch | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | Reclo | Optional record number to seek to before reading, low-byte |
+|     | Rechi | Optional record number to seek to before reading, high-byte | 
+
 Response:
-	CMD: 0dh
-	DATA: |FCBlo|FCBhi|Status|[Datax128|]
-Status=0 (success), 1 (end of file) or 0FFh (failure).
-Datax128 is not returned on failure.
-Write File (0eh)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0dh | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 1=end of file, 0xFF=failure |
+|     | Datax128 | Optional read data - only returned on success |
+
+#### Write File
+
 Write the 128-byte block, Datax128, to a previously opened file at the location specified by Rechi,Reclo. If Rechi,Reclo is not specified, then write to the file at the current location.
+
+**NOTE** If Reclo is provided, then Rechi MUST be provided.
+
 Request:
-	CMD: 0eh
-	DATA:  |FCBlo|FCBhi|[Reclo|Rechi|]Datax128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0eh | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | Reclo | Optional record number to seek to before writing, low-byte |
+|     | Rechi | Optional record number to seek to before writing, high-byte | 
+|     | Datax128 | Write data |
+
 Response:
-	CMD: 0fh
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success), 5 (disk full) or 0FFh (failure).
-Create File (10h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 0fh | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 5=disk full (access denied), 0xFF=failure |
+
+
+#### Create File
+
 Create the named file on the server for writing only. If the file already exists, it is truncated.
+
 Request:
-	CMD: 10h
-	DATA: |FCBlo|FCBhi|NAMEx8|EXTx3|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 10h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | NAMEx8| File name |
+|     | EXTx3 | File extension | 
+
 Response:
-	CMD: 11h
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success) or 0FFh (failure).
-Rename File (12h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 11h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=failure |
+
+
+#### Rename File
+
 Rename the old filename on the server to new filename. Only renames the first file found.
+
 Request:
-	CMD: 12h
-	DATA: |oldNAMEx8|oldEXTx3|newNAMEx8|newEXTx3|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 12h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | oldNAMEx8| Old File name |
+|     | oldEXTx3 | Old File extension | 
+|     | newNAMEx8| New File name |
+|     | newEXTx3 | New File extension | 
+
 Response:
-	CMD: 13h
-	DATA: |FCBlo|FCBhi|Status|
-Status=0 (success) or 0FFh (failure).
-Change Dir (20h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 13h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=failure |
+
+
+#### Change Dir
+
 Change the client's working directory on the server. Note that only lower-case directory names on the server are supported. 
+
 Request:
-	CMD: 20h
-	DATA: |Pathv128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 20h | Pathv128 | Optional new directory to change into. |
+
 Response:
-	CMD: 21h
-	DATA: |Status|Pathv128|
-Status=0 (success) or 0ffh (failure). The client's current working directory is returned in the variable-length Pathv128 for success and failure.
-Make Dir (22h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 21h | STAT  | 0=success, 0xFF=failure |
+|     | Pathv128 | Variable-length client current working directory. |
+
+
+
+#### Make Dir
+
 Make a directory on the server. The server directory will be in lower case. 
+
 Request:
-	CMD: 22h
-	DATA: |Pathv128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 22h | Pathv128 | Variable-length name of new directory. |
+
 Response:
-	CMD: 23h
-	DATA: |Status|Errorv128|
-Status=0 (success) or 0ffh (failure).  The variable-length error message, if any, is returned in Errorv128.
-Remove Dir (24h)
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 23h | STAT  | 0=success, 0xFF=failure |
+|     | Errorv128 | Optional variable-length error message. |
+
+
+#### Remove Dir
+
 Remove a directory on the server.
+
 Request:
-	CMD: 24h
-	DATA: |Pathv128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 24h | Pathv128 | Variable-length name of directory to remove. |
+
 Response:
-	CMD: 25h
-	DATA: |Status|Errorv128|
-Status=0 (success) or 0ffh (failure).  The variable-length error message, if any, is returned in Errorv128.
-Echo (30h)
-The server returns the variable-length message it receives.
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 25h | STAT  | 0=success, 0xFF=failure |
+|     | Errorv128 | Optional variable-length error message. |
+
+
+#### Echo
+
+The server returns the variable-length message it received.
+
 Request:
-	CMD: 30h
-	DATA: |Msgv128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 30h | Msgv128 | Variable-length message. |
+
 Response:
-	CMD: 31h
-	DATA: |Msgv128|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 31h | Msgv128 | Variable-length message returned. |
