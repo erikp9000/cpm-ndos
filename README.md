@@ -48,7 +48,7 @@ The NDOS.COM TSR installs itself in the 2K bytes just below the BDOS and hooks
 the BDOS entry vector (addresses 6&7) to preserve itself and also so that all 
 BDOS calls are first routed through the NDOS. The NDOS also hooks the Warm 
 start vector in the BIOS jump table so that NDOS can reload the relocatable 
-CCP.COM from drive A: on a warm start. If CCP.COM is not found, NDOS calls 
+CCP.COM from drive A: on a warm start. If CCP.COM is not found, NDOS jumps to 
 the old BIOS Warm start which recovers the CP/M system from the system tracks, 
 removing NDOS from memory.
 
@@ -76,8 +76,8 @@ Thus, all files on the server belong to all user numbers.
 | 14                 | SELECT DISK         | NDOS stores new active disk and returns if network disk; else, jumps to BDOS. |
 | 15                 | OPEN FILE           | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 16                 | CLOSE FILE          | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
-| 17                 | SEARCH FOR FIRST    | If the network disk is selected in the indicated FCB, NDOS calls server and returns response in the DMA buffer. The response is always returned in the DMA buffer as the first directory entry (directory code=0) and the last extent of the file so that S2, EX, and RC can be used to compute the file size. The block allocation vector of the directory entry is initialized based on the number of 1024-byte blocks used for the final directory extent of the file (all blocks are 3). This supports STAT.COM which uses the  |
-| 18                 | SEARCH FOR NEXT     | If the directory of the network disk is currently being accessed, then NDOS calls the server and returns the next matching directory entry, else, jumps to BDOS. If the EX byte in the FCB was set to '?' when srchf (17) was called, then NDOS will return all of the directory extents (up to 32 for a maximum of 512KB file size) for the matching file, in reverse order. Since the first response was the last directory extent, the remaining directory extent allocation vectors are always full (all blocks are 3). |
+| 17                 | SEARCH FOR FIRST    | If the network disk is selected in the indicated FCB, NDOS calls server and returns response in the DMA buffer. The response is always returned in the DMA buffer as the first directory entry (directory code=0) and the last extent of the file so that S2, EX, and RC can be used to compute the file size. The block allocation vector of the directory entry is initialized based on the number of 1024-byte blocks used for the final directory extent of the file (all blocks are 3). This supports STAT.COM which uses the directory allocation vector to compute the filesize. |
+| 18                 | SEARCH FOR NEXT     | If the directory of the network disk is currently being accessed, then NDOS calls the server and returns the next matching directory entry, else, jumps to BDOS. If the EX byte in the FCB was set to '?' when srchf (17) was called, then NDOS will return all of the directory extents (up to 32 for a maximum of 512KB file size) for the matching file, in reverse order (supports STAT.COM which counts directory extents to compute file size). Since the first response was the last directory extent, the remaining directory extent allocation vectors are always full (all blocks are 3). |
 | 19                 | DELETE FILE         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 20                 | READ SEQUENTIAL     | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the result in the DMA; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the next block. Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
 | 21                 | WRITE SEQUENTIAL    | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the next block.Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
@@ -92,8 +92,7 @@ Thus, all files on the server belong to all user numbers.
 | 34                 | WRITE RANDOM        | Not supported. NDOS panics and warm boots the system. |
 | 35                 | COMPUTE FILE SIZE   | Not supported. NDOS panics and warm boots the system. |
 | 36                 | SET RANDOM RECORD   | If the selected disk in the FCB is the network disk, NDOS sets r0,r1,r2 in the FCB to the file offset addresed by S2,EX,CR; else, jumps to BDOS. |
-| 40                 | WRITE RANDOM        | Not supported. NDOS panics and warm boots the system. |
-| ^                  | WITH ZERO FILL      | ^ |
+| 40                 | WRITE RANDOM WITH ZERO FILL | Not supported. NDOS panics and warm boots the system. |
 | 64                 | NDOS GET VERSION    | Returns NDOS version as major.minor, packed BCD in A. If NDOS is not present, BDOS returns A=0. |
 | 65                 | NDOS SEND MESSAGE   | Sends packet referenced by DE. See NDOS Protocol Envelope. The Len byte includes itself and the Checksum byte as well as the Command and Data size. The Checksum byte shall be set to 0. sendmsg computes the Checksum during transmission. |
 | 66                 | NDOS RECEIVE MESSAGE| Returns received packet in DE, A=0(success)/FF(timeout). See NDOS Protocol Envelope. |
@@ -139,30 +138,77 @@ The NDOS Protocol is a request/response protocol where all requests are
 initiated by the client (CP/M machine). All messages are wrapped in the 
 standard Envelope.
 
-Envelope
+### Envelope
+
 All requests and responses are wrapped in a standard envelope.
-	|LEN|CMD|DATA ...|CHK|
-The LEN byte includes itself, the CMD byte, the CHK byte, and the length of the variable-length DATA field. Therefore, length(DATA) = LEN-3.
-CHK = 2's complement of sum bytes from LEN to byte preceeding CHK. The recipient loads its checksum accumulator with 0 at the beginning of a message and adds each byte received to the accumulator. Upon receiving the CHK byte from the transmitter, the checksum shall be 0. If the checksum is not 0, there was an error in transmission and the packet shall be dropped.
-Data
-Find First (02h)
-Find the first file matching the NAMEx8 and EXTx3 parameters. The FCBhi,FCBlo values are the actual address of the File Control Block on the client. The server uses this value to correlate the open files/directory on the server with the FCB in the client.
+
+| LEN | CMD | DATA ... | CHK |
+| --- | --- | -------- | --- |
+
+Where:
+  - LEN is 1-byte length of message including itself, the CMD byte, the 
+    CHK byte, and the length of the variable-length DATA field. Therefore, 
+	length(DATA) = LEN-3.
+  - CMD is 1-byte command code.
+  - DATA is variable-length command data.
+  - CHK is 1-byte 2's complement of sum bytes from LEN to byte preceeding 
+    CHK. The recipient loads its checksum accumulator with 0 at the beginning 
+	of a message and adds each byte received to the accumulator. Upon 
+	receiving the CHK byte from the transmitter, the checksum shall be 0. If 
+	the checksum is not 0, there was an error in transmission and the packet
+	shall be dropped.
+  
+### NDOS Commands
+
+#### Find First
+
+Find the first file matching the NAMEx8 and EXTx3 parameters. The FCBhi,FCBlo values 
+are the actual address of the File Control Block on the client. The server uses this
+ value to correlate the open files/directory on the server with the FCB in the client.
+
 Request:
-	CMD: 02h
-	DATA: |FCBlo|FCBhi|NAMEx8|EXTx3|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 02h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | NAMEx8| File name with optional wildcard character '?' |
+|     | EXTx3 | File extension with optional wildcard character '?' | 
+
 Response:
-	CMD: 03h
-	DATA: |FCBlo|FCBhi|Status=0|NAMEx8|EXTx3|EX|S1=0|S2|RC|
-Response for end of directory:
-	CMD: 03h
-	DATA: |FCBlo|FCBhi|Status=0FFh|
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 03h | FCBlo | Low-byte of FCB address on client |
+|     | FCBhi | High-byte of FCB address on client |
+|     | STAT  | 0=success, 0xFF=end of directory |
+|     | NAMEx8| File name - not present if STAT=0xFF |
+|     | EXTx3 | File extension - not present if STAT=0xFF | 
+|     | EX    | Directory extent count (0-31) |
+|     | S1    | =0
+|     | S2    | Overflow of EX (0-15) |
+|     | RC    | # 128-byte records in last extent |
+
+	
 The file size is returned in S2, EX, and RC as a count of 128-byte blocks, where:
-	S2=file size / 524288 [0-15, 4 bits]
-	EX=(file size % 524288) / 16384 [0-31, 5 bits]
-	RC=(file size % 16384) / 128 [0-127, 7 bits]
-The maximum file size is 8MB (8388608 bytes) or 65536 128-byte blocks. NDOS populates the block allocation vector of the directory entry to indicate how many blocks of the last extent are allocated before returning to the caller. 
-If a directory is matched, the name is truncated to 11 bytes and returned enclosed in '<' and '>' in Filename and Extension. The "<.>" is the current directory and "<..>" is the previous directory. Directory names are returned in their proper case while filenames are always returned in lower-case.
-If the file is read-only on the server, then the most-significant bit of the first EXT byte is set to 1. The system file type (most-significant bit of the second EXT byte) is not supported.
+	- S2=file size / 524288 *[0-15, 4 bits]*
+	- EX=(file size % 524288) / 16384 *[0-31, 5 bits]*
+	- RC=(file size % 16384) / 128 *[0-127, 7 bits]*
+	
+The maximum file size is 8MB (8388608 bytes) or 65536 128-byte blocks. NDOS 
+populates the block allocation vector of the directory entry to indicate how 
+many blocks of the last extent are allocated before returning to the caller. 
+
+If a directory is matched, the name is truncated to 11 bytes and returned 
+enclosed in '<' and '>' in Filename and Extension. The "<.>" is the current 
+directory and "<..>" is the previous directory. Directory names are returned 
+in their proper case while filenames are always returned in lower-case.
+
+If the file is read-only on the server, then the most-significant bit of the 
+first EXT byte is set to 1. The system/hidden file type (most-significant bit of the 
+second EXT byte) is not supported.
+
+
 Find Next (04h)
 Find the next file matching the search parameters specified in Find First.
 Request:
