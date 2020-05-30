@@ -5,6 +5,14 @@ program for CP/M 2.2 which adds a network drive (P:) over a serial port. The
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
+Why not CP/NET?
+
+CP/NET relies on MP/M for the server side, which I wasn't interested in running, 
+and MP/M doesn't support directories like a modern system. I figured, if I was
+going to write an MP/M replacement, why not start fresh? Also, I was intrigued
+by the challenge.
+
+
 ## Architecture
 
 NDOS consists of three major parts: 
@@ -411,7 +419,7 @@ Response:
 
 #### Make Dir
 
-Make a directory on the server. The server directory will be in lower case. 
+Make a directory on the server. The new server directory will be in lower-case. 
 
 Request:
 
@@ -460,3 +468,5 @@ Response:
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
 | 31h | Msgv128 | Variable-length message returned. |
+
+
