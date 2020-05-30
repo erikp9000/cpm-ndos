@@ -1,4 +1,9 @@
 ===========================================================
+Build NDOS and tools:
+
+  submit make.sub
+  
+===========================================================
 Build Relocatable Command Console Processor (CCP):
 
   asm ccpr

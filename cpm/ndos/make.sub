@@ -8,3 +8,5 @@ a:asm rmdir
 a:load rmdir
 a:asm necho
 a:load necho
+a:asm nstat
+a:load nstat
