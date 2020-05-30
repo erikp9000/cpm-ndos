@@ -1,0 +1,10 @@
+a:asm ndos
+a:load ndos
+a:asm cd
+a:load cd
+a:asm mkdir
+a:load mkdir
+a:asm rmdir
+a:load rmdir
+a:asm necho
+a:load necho

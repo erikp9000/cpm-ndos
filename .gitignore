@@ -1,0 +1,6 @@
+ndos-srv
+*.o
+*.prn
+*.hex
+*.bak
+*.com

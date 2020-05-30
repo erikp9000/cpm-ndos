@@ -1,0 +1,12 @@
+{
+  "path": [
+    "/share/Computers/ndos-srv/cpm/ndos",
+    "/share/Computers/ndos-srv/cpm/bin",
+	"/share/Computers/ndos-srv/cpm/dri",
+	"/share/Computers/ndos-srv/cpm/microsoft"
+  ],
+  "serial": [
+    { "port": "/dev/ttyAMA0", "baud": "9600" },
+    { "port": "/dev/ttyUSB0", "baud": "19200" }
+  ]
+}
