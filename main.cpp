@@ -41,6 +41,9 @@ client_map_t client_map;
 static Value _empty;
 Value& search_path = _empty;
 
+extern speed_t string_to_speed (const string& str);
+extern unsigned long int speed_to_baud (const speed_t& speed);
+extern speed_t baud_to_speed (const int& baud);
 
 // client receive buffer object
 struct client_buf_t {
@@ -57,7 +60,7 @@ struct client_buf_t {
 typedef std::map<int, client_buf_t> client_buf_map_t;
 client_buf_map_t client_bufs;
 
-int set_interface_attribs(int fd, int speed)
+int set_interface_attribs(int fd, int baud)
 {
     struct termios tty;
 
@@ -66,17 +69,24 @@ int set_interface_attribs(int fd, int speed)
         return -1;
     }
 
-    cfsetospeed(&tty, (speed_t)speed);
-    cfsetispeed(&tty, (speed_t)speed);
+	speed_t speed = baud_to_speed(baud);
+	if(speed == -1) 
+	{
+	    printf("Unrecognized baud rate %d\n", baud);
+        return -1;
+    }
 
-    tty.c_cflag |= (CLOCAL | CREAD);    /* ignore modem controls */
+	cfsetospeed(&tty, (speed_t)speed);
+	cfsetispeed(&tty, (speed_t)speed);
+	
+    tty.c_cflag |= (CLOCAL | CREAD);    // ignore modem controls
     tty.c_cflag &= ~CSIZE;
-    tty.c_cflag |= CS8;         /* 8-bit characters */
-    tty.c_cflag &= ~PARENB;     /* no parity bit */
-    tty.c_cflag &= ~CSTOPB;     /* only need 1 stop bit */
-    tty.c_cflag &= ~CRTSCTS;    /* no hardware flowcontrol */
+    tty.c_cflag |= CS8;         // 8-bit characters
+    tty.c_cflag &= ~PARENB;     // no parity bit
+    tty.c_cflag &= ~CSTOPB;     // only need 1 stop bit
+    tty.c_cflag &= ~CRTSCTS;    // no hardware flowcontrol
 
-    /* setup for non-canonical mode */
+    // setup for non-canonical mode
     //tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
     //tty.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
     //tty.c_oflag &= ~OPOST;
@@ -84,9 +94,10 @@ int set_interface_attribs(int fd, int speed)
     tty.c_lflag = 0;
     tty.c_oflag = 0;
 
-    /* fetch bytes as they become available */
-    tty.c_cc[VMIN] = 1;
-    tty.c_cc[VTIME] = 1;
+    // By returning after 0.1 seconds, we can cleanup the client receive buffer if we get out of sync.
+	// This is good for serial ports where dropped characters are a definite possibility.
+    tty.c_cc[VMIN] = 0;  // set to 1 to block until a byte is available
+    tty.c_cc[VTIME] = 1;  // 0.1 second timer
 
     if (tcsetattr(fd, TCSANOW, &tty) != 0) {
         printf("Error from tcsetattr: %s\n", strerror(errno));
@@ -95,21 +106,21 @@ int set_interface_attribs(int fd, int speed)
     return 0;
 }
 
-void set_mincount(int fd, int mcount)
-{
-    struct termios tty;
+// void set_mincount(int fd, int mcount)
+// {
+    // struct termios tty;
 
-    if (tcgetattr(fd, &tty) < 0) {
-        printf("Error tcgetattr: %s\n", strerror(errno));
-        return;
-    }
+    // if (tcgetattr(fd, &tty) < 0) {
+        // printf("Error tcgetattr: %s\n", strerror(errno));
+        // return;
+    // }
 
-    tty.c_cc[VMIN] = mcount ? 1 : 0;
-    tty.c_cc[VTIME] = 1; // 0.1 second timer
+    // tty.c_cc[VMIN] = mcount ? 1 : 0;
+    // tty.c_cc[VTIME] = 1; // 0.1 second timer
 
-    if (tcsetattr(fd, TCSANOW, &tty) < 0)
-        printf("Error tcsetattr: %s\n", strerror(errno));
-}
+    // if (tcsetattr(fd, TCSANOW, &tty) < 0)
+        // printf("Error tcsetattr: %s\n", strerror(errno));
+// }
 
 
 void send_resp(const int fd, const msgbuf_t &resp)
@@ -230,23 +241,6 @@ void recv_request(client_t & client)
 
 int main()
 {
-
-#if 0
-    char *portname = (char*)"/dev/ttyAMA0";
-    int wlen;
-
-    int fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
-    if (fd < 0) {
-        printf("Error opening %s: %s\n", portname, strerror(errno));
-        return -1;
-    }
-
-    // baudrate 9600, 8 bits, no parity, 1 stop bit
-    set_interface_attribs(fd, B9600);
-    set_mincount(fd, 0); // pure timed receive
-    //set_mincount(fd, 1); // block until first byte received
-#endif
-
 	// Read config file
 	ifstream ifs("config.json");
 	IStreamWrapper isw(ifs);
@@ -256,9 +250,41 @@ int main()
 	if(ok)
 	{
 		printf("Parsed the config file\n");
+		
+		// set search path
 		search_path = config["path"];
-		for (SizeType i = 0; i < search_path.Size(); i++) // Uses SizeType instead of size_t
+		// print search path
+		for (SizeType i = 0; i < search_path.Size(); i++)
 			printf("a[%d] = %s\n", i, search_path[i].GetString());
+		
+		// process serial ports
+		Value& serial_ports = config["serial"];
+		for (SizeType i = 0; i < serial_ports.Size(); i++)
+		{
+			string port = serial_ports[i]["port"].GetString();
+			int baud = serial_ports[i]["baud"].GetInt();
+			
+			//printf("port=%s baud=%d\n", port, baud);
+			
+			int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+			if (fd < 0) {
+				printf("Error opening %s: %s\n", port.c_str(), strerror(errno));
+				continue;
+			}
+
+			// baudrate 'baud', 8 bits, no parity, 1 stop bit
+			if(0 != set_interface_attribs(fd, baud))
+			{
+				printf("Error setting baud rate (%d) on port %s\n", baud, port.c_str());
+				close(fd);
+				continue;
+			}
+
+            // add port to client map
+            client_t & client = client_map[port];			
+            client.fd = fd;
+            client.name = port;
+		}
 	}
 	
     struct sockaddr_in my_addr, peer_addr;

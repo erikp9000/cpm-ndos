@@ -49,8 +49,11 @@ There are also several CP/M utilities:
 
   - Support for raw serial ports is temporarily not supported.
   
+  - The Network I/O System (NIOS) is built into the NDOS and requires
+    customization for the target system serial port.
+  
 
-## NDOS.ASM/COM
+## NDOS.COM
 
 The NDOS.COM TSR installs itself in the 2K bytes just below the BDOS and hooks 
 the BDOS entry vector (addresses 6&7) to preserve itself and also so that all 
@@ -62,29 +65,31 @@ removing NDOS from memory.
 
 ### Porting Considerations
 
-  - The NDOS is not relocatable and must be built for the system memory. Adjust 
-    memSz and biosSz in NDOS.ASM as appropriate for the target system.
+  - The NDOS is not relocatable and must be built for the target system memory. 
+    Adjust memSz and biosSz in NDOS.ASM as appropriate for the target system.
 	
   - The NDOS is configured to use the second serial port (@12h/13h) of the 
     88-2SIO Serial Interface Board for the Altair 8800. To support other systems, 
 	the smsg and rmsg functions in NDOS.ASM must be updated.
 	
-  - The network drive is P:. Change NDOSDSK to select another drive.
+  - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
 
 ### BDOS Function Summary
 
-All BDOS functions not listed here are passed to the BDOS.
+Below is a table of the BDOS functions which NDOS hooks into in order to process
+commands for the network disk. All BDOS functions not listed here are passed to 
+the BDOS.
 
 **NOTE** NDOS ignores the current user number (code) set by BDOS function 32. 
 Thus, all files on the server belong to all user numbers.
 
 | BDOS function code | Function name       | Comments |
 | ------------------ | ------------------- | -------- |
-| 13                 | RESET DISK SYSTEM   | NDOS sets DMA to default address (80h) and jumps to BDOS. |
+| 13                 | RESET DISK SYSTEM   | NDOS resets internal DMA address to default (80h) and jumps to BDOS. |
 | 14                 | SELECT DISK         | NDOS stores new active disk and returns if network disk; else, jumps to BDOS. |
 | 15                 | OPEN FILE           | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 16                 | CLOSE FILE          | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
-| 17                 | SEARCH FOR FIRST    | If the network disk is selected in the indicated FCB, NDOS calls server and returns response in the DMA buffer. The response is always returned in the DMA buffer as the first directory entry (directory code=0) and the last extent of the file so that S2, EX, and RC can be used to compute the file size. The block allocation vector of the directory entry is initialized based on the number of 1024-byte blocks used for the final directory extent of the file (all blocks are 3). This supports STAT.COM which uses the directory allocation vector to compute the filesize. |
+| 17                 | SEARCH FOR FIRST    | If the selected disk in the FCB is the network disk, NDOS calls server and returns response in the DMA buffer. The response is always returned in the DMA buffer as the first directory entry (directory code=0) and the last extent of the file so that S2, EX, and RC can be used to compute the file size. The block allocation vector of the directory entry is initialized based on the number of 1024-byte blocks used for the final directory extent of the file (all blocks are 3). This supports STAT.COM which uses the directory allocation vector to compute the filesize. |
 | 18                 | SEARCH FOR NEXT     | If the directory of the network disk is currently being accessed, then NDOS calls the server and returns the next matching directory entry, else, jumps to BDOS. If the EX byte in the FCB was set to '?' when srchf (17) was called, then NDOS will return all of the directory extents (up to 32 for a maximum of 512KB file size) for the matching file, in reverse order (supports STAT.COM which counts directory extents to compute file size). Since the first response was the last directory extent, the remaining directory extent allocation vectors are always full (all blocks are 3). |
 | 19                 | DELETE FILE         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 20                 | READ SEQUENTIAL     | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the result in the DMA; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the next block. Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
@@ -92,15 +97,15 @@ Thus, all files on the server belong to all user numbers.
 | 22                 | MAKE FILE           | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 23                 | RENAME FILE         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 25                 | RETURN CURRENT DISK | If active disk is network disk, NDOS returns it, else jumps to BDOS |
-| 26                 | SET DMA ADDRESS     | NDOS stores the new DMA address and jumps to BDOS. |
+| 26                 | SET DMA ADDRESS     | NDOS stores internally the new DMA address and jumps to BDOS. |
 | 27                 | GET ADDR (ALLOC)    | If the active disk is the network disk, NDOS returns the network disk directory allocation vector which reports that the directory is full; else, jumps to BDOS. |
-| 30                 | SET FILE ATTRIBUTES | Not supported. NDOS panics and warm boots the system. |
+| 30                 | SET FILE ATTRIBUTES | **Not supported** NDOS panics and warm boots the system. |
 | 31                 | GETADDR(DISKPARMS)  | NDOS returns network disk parameter block if active disk is network disk, else jumps to BDOS; the disk parameter block indicates that there are 512 directory entries on the network disk and a data allocation block size of 1024 bytes (BSH=3, BLM=7). |
-| 33                 | READ RANDOM         | Not supported. NDOS panics and warm boots the system. |
-| 34                 | WRITE RANDOM        | Not supported. NDOS panics and warm boots the system. |
-| 35                 | COMPUTE FILE SIZE   | Not supported. NDOS panics and warm boots the system. |
+| 33                 | READ RANDOM         | **Not supported** NDOS panics and warm boots the system. |
+| 34                 | WRITE RANDOM        | **Not supported** NDOS panics and warm boots the system. |
+| 35                 | COMPUTE FILE SIZE   | **Not supported** NDOS panics and warm boots the system. |
 | 36                 | SET RANDOM RECORD   | If the selected disk in the FCB is the network disk, NDOS sets r0,r1,r2 in the FCB to the file offset addresed by S2,EX,CR; else, jumps to BDOS. |
-| 40                 | WRITE RANDOM WITH ZERO FILL | Not supported. NDOS panics and warm boots the system. |
+| 40                 | WRITE RANDOM WITH ZERO FILL | **Not supported** NDOS panics and warm boots the system. |
 | 64                 | NDOS GET VERSION    | Returns NDOS version as major.minor, packed BCD in A. If NDOS is not present, BDOS returns A=0. |
 | 65                 | NDOS SEND MESSAGE   | Sends packet referenced by DE. See NDOS Protocol Envelope. The Len byte includes itself and the Checksum byte as well as the Command and Data size. The Checksum byte shall be set to 0. sendmsg computes the Checksum during transmission. |
 | 66                 | NDOS RECEIVE MESSAGE| Returns received packet in DE, A=0(success)/FF(timeout). See NDOS Protocol Envelope. |
@@ -121,7 +126,7 @@ server-side of the NDOS Protocol. It supports multiple clients (CP/M machines).
 ### Hardware
 
   - Hardwired serial ports. The serial ports used by the ndos-srv are configured 
-    in the configuration file. *[TODO]*
+    in the configuration file.
   - USR-TCP232-302 RS232-to-Ethernet Converter. The Converter can be configured 
     for baud rates from 600~230.4Kbps. The ndos-srv supports the TCP Client mode 
 	(on TCP port 8234) in which the Converter connects to the configured server 
@@ -135,8 +140,8 @@ JSON format.
     { 
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
-        { "port": "/dev/ttyAMA0", "baud": "9600" },
-        { "port": "/dev/ttyUSB0", "baud": "19200" }
+        { "port": "/dev/ttyAMA0", "baud": 9600 },
+        { "port": "/dev/ttyUSB0", "baud": 19200 }
       ]
     }
 
@@ -165,7 +170,12 @@ Where:
 	receiving the CHK byte from the transmitter, the checksum shall be 0. If 
 	the checksum is not 0, there was an error in transmission and the packet
 	shall be dropped.
-  
+
+The intrachar timeout is 0.1 seconds. If no byte is received within this 
+period, the receiver shall discard any partially received message and reset
+its receive buffer. 
+
+
 ### NDOS Commands
 
 #### Find First
@@ -202,14 +212,14 @@ The file size is returned in S2, EX, and RC as a count of 128-byte blocks, where
 
 	- S2=file size / 524288 *[0-15, 4 bits]*
 	- EX=(file size % 524288) / 16384 *[0-31, 5 bits]*
-	- RC=(file size % 16384) / 128 *[0-127, 7 bits]*
+	- RC=1 + (file size % 16384) / 128 *[1-128, 7 bits]*
 	
 The maximum file size is 8MB (8388608 bytes) or 65536 128-byte blocks. NDOS 
 populates the block allocation vector of the directory entry to indicate how 
 many blocks of the last extent are allocated before returning to the caller. 
 
-If a directory is matched, the name is truncated to 11 bytes and returned 
-enclosed in '<' and '>' in Filename and Extension. The "<.>" is the current 
+If a directory is matched, the name is truncated to 9 bytes and returned 
+in Filename and Extension and enclosed in '<' and '>'. The "<.>" is the current 
 directory and "<..>" is the previous directory. Directory names are returned 
 in their proper case while filenames are always returned in lower-case.
 
