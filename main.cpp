@@ -19,6 +19,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "client.h"
 
@@ -39,8 +40,8 @@ typedef std::map<std::string, client_t> client_map_t;
 client_map_t client_map;
 
 // the search path for all clients
-static Value _empty;
-Value& search_path = _empty;
+vector<string> search_path;
+string root_path;
 
 extern speed_t string_to_speed (const string& str);
 extern unsigned long int speed_to_baud (const speed_t& speed);
@@ -240,7 +241,7 @@ void recv_request(client_t & client)
 }
 
 
-int main()
+void read_config()
 {
 	// Read config file
 	ifstream ifs("config.json");
@@ -252,11 +253,22 @@ int main()
 	{
 		printf("Parsed the config file\n");
 		
+		// set root directory
+		string root = config["root"].GetString();
+		chdir(root.c_str());
+		char *d = get_current_dir_name();
+		root_path = d;
+		free(d);
+		printf("root dir is '%s'\n", root_path.c_str());
+
 		// set search path
-		search_path = config["path"];
+		Value& path = config["path"];
 		// print search path
-		for (SizeType i = 0; i < search_path.Size(); i++)
-			printf("a[%d] = %s\n", i, search_path[i].GetString());
+		for (SizeType i = 0; i < path.Size(); i++)
+		{
+			printf("a[%d] = %s\n", i, path[i].GetString());
+			search_path.push_back(path[i].GetString());
+		}
 		
 		// process serial ports
 		Value& serial_ports = config["serial"];
@@ -283,8 +295,9 @@ int main()
 
             // add port to client map
             client_t & client = client_map[port];			
-            client.fd = fd;
-            client.name = port;
+	    client.init(fd, port, root_path);
+            //client.fd = fd;
+            //client.name = port;
 		}
 	}
 	else
@@ -292,7 +305,12 @@ int main()
 		printf("JSON parse error: %s (%u)\n",
 			GetParseError_En(ok.Code()), ok.Offset());
 	}
-	
+}
+
+int main()
+{
+    read_config();
+
     struct sockaddr_in my_addr, peer_addr;
     socklen_t peer_addr_size = sizeof(peer_addr);
 
@@ -386,8 +404,9 @@ int main()
             if((client.fd != -1) && (fd != client.fd))
                 close(client.fd);
 
-            client.fd = fd;
-            client.name = client_name;
+	    client.init(fd, client_name, root_path);
+            //client.fd = fd;
+            //client.name = client_name;
         }
         else // determine which client & process received data
         {

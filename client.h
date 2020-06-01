@@ -8,7 +8,12 @@
 #include <string>
 #include <map>
 
-typedef std::vector<uint8_t> msgbuf_t;
+using namespace std;
+
+typedef vector<uint8_t> msgbuf_t;
+
+extern vector<string> search_path;
+extern string root_path;
 
 #define CMD_FINDFIRST  0x02
 #define CMD_FINDNEXT   0x04
@@ -51,8 +56,15 @@ public:
 
     msgbuf_t process_cmd(const msgbuf_t& msg);
 
+    void init(int _fd, string _name, string _root) {
+        fd = _fd;
+        if(_name.length()) name = _name;
+        if(cwd == ".") cwd = _root;
+    }
+
+    operator int() const { return fd; }
     int fd;           // I/O file descriptor for receiving & sending messages
-    std::string name; // IP address of the client or serial port device name
+
 
 protected:
     msgbuf_t open_file(const msgbuf_t& msg);
@@ -76,8 +88,10 @@ private:
     int get_fcb_addr(const msgbuf_t& msg);
 
 private:
-    std::string cwd;  // current working directory
+    string cwd;  // current working directory
     fcb_map_t fcbs;  // file control block map
+
+    string name; // IP address of the client or serial port device name
 };
 
 

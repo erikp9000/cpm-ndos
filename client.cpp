@@ -7,18 +7,7 @@
 #include <errno.h>
 #include <malloc.h>
 
-#include "rapidjson/document.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/stringbuffer.h"
-#include <iostream>
-#include "rapidjson/istreamwrapper.h"
-#include <fstream>
  
-using namespace rapidjson;
-using namespace std;
-
-extern Value& search_path;
-
 msgbuf_t client_t::process_cmd(const msgbuf_t& msg)
 {
     //printf("process_cmd:\n");
@@ -176,7 +165,7 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
 
     reset_fcb(fcb);
 
-	printf("find_first(%04x): open dir '%s'\n", fcb_addr, cwd.c_str());
+    printf("find_first(%04x): open dir '%s'\n", fcb_addr, cwd.c_str());
     fcb.d = opendir(cwd.c_str());
 
     // extract the filter
@@ -345,12 +334,13 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
 	// if the file wasn't found, search the search_path
 	if(resp[3] == 0xff)
 	{
+printf("open_file: search for file in search path\n");
 		string pushd = cwd; // push current working directory
-		for (SizeType i = 0; i < search_path.Size(); i++)
+		for (size_t i = 0; i < search_path.size(); i++)
 		{
-			//printf("open_file: search '%s'\n", search_path[i].GetString());
+			printf("open_file: search '%s'\n", search_path[i].c_str());
 			// set the current working directory
-			cwd = search_path[i].GetString();
+			cwd = root_path + search_path[i];
 			// search new directory
 			resp = find_first(msg);
 			if(resp[3] != 0xff) 
@@ -660,6 +650,7 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2+128);
+    string old_path = cwd; // remember current working directory
 
 //    for(size_t i=0 ; i<msg.size() ; ++i)
 //        printf("%02x ", msg[i]);
@@ -675,22 +666,36 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
     for(size_t i=0 ; i<new_dir.length() ; ++i)
 	new_dir[i] = tolower(new_dir[i]);
 
+    // detect change to root and add root_path
+    if(new_dir[0] == '/')
+	new_dir = root_path + new_dir;
+
     printf("change_dir new_dir='%s'\n", new_dir.c_str());
 
     if(new_dir.length())
         resp[1] = chdir(new_dir.c_str());
 
-    // get new current working directory
-    if(!getcwd((char*)&resp[2], 128))
-        sprintf((char*)&resp[2], "Directory too long.");
+    // remember client's new current working directory
+    char *d = get_current_dir_name();
+    cwd = d;
+    free(d);
+
+    // is this directory under the root_path?
+    if(strncmp(root_path.c_str(), cwd.c_str(), root_path.length()))
+    {
+        // nope. go back to original current working directory
+	cwd = old_path;
+        chdir(cwd.c_str());
+    }
+
+    // copy new directory into response
+    if(cwd.length() < 128)
+	sprintf((char*)&resp[2], cwd.c_str());
+    else
+        sprintf((char*)&resp[2], "Directory name too long.");
 
     resp.resize(2 + strlen((char*)&resp[2]));
 	
-	// remember this client's current working directory
-	char *d = get_current_dir_name();
-	cwd = d;
-	free(d);
-
     return resp;
 }
 
