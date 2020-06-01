@@ -95,10 +95,9 @@ int set_interface_attribs(int fd, int baud)
     tty.c_lflag = 0;
     tty.c_oflag = 0;
 
-    // By returning after 0.1 seconds, we can cleanup the client receive buffer if we get out of sync.
-	// This is good for serial ports where dropped characters are a definite possibility.
+    // Pure timed read. If VMIN >0, we can get out of sync and get stuck.
     tty.c_cc[VMIN] = 0;  // set to 1 to block until a byte is available
-    tty.c_cc[VTIME] = 1;  // 0.1 second timer
+    tty.c_cc[VTIME] = 1;  // *0.1 second timer
 
     if (tcsetattr(fd, TCSANOW, &tty) != 0) {
         printf("Error from tcsetattr: %s\n", strerror(errno));
@@ -184,7 +183,8 @@ void recv_request(client_t & client)
         else if(rdlen == 0)
         {
             // reset buf for next message (serial)
-            printf("read timeout\n");
+	    // if no characters, this isn't a timeout
+            if(offset) printf("read timeout\n");
             offset = 0;
             cnt = 1;
             return;

@@ -1,9 +1,9 @@
 {
   "path": [
-    "cpm/ndos",
-    "cpm/bin",
-	"cpm/dri",
-	"cpm/microsoft"
+    "/home/erik/cpm-ndos/cpm/ndos",
+    "/home/erik/cpm-ndos/cpm/bin",
+	"/home/erik/cpm-ndos/cpm/dri",
+	"/home/erik/cpm-ndos/cpm/microsoft"
   ],
   "serial": [
     { "port": "/dev/ttyAMA0", "baud": 9600 }
