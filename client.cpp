@@ -7,7 +7,122 @@
 #include <errno.h>
 #include <malloc.h>
 
- 
+#include <termios.h>
+#include <unistd.h>
+
+
+// This function manages the receive buffer for a client.
+// Here a request is assembled and if the checksum is valid,
+// then the command is processed and a response is sent.
+// The function handles partial requests so it can be 
+// called multiple times with chunks of the full request.
+void client_t::recv_request()
+{
+    do {
+//printf("recv_request (%d) entered\n", m_fd);
+        int rdlen = read(m_fd, m_buffer + m_offset, m_cnt - m_offset);
+//printf("recv_request (%d) read returned (%d)\n", fd, rdlen);
+
+        if(rdlen < 0)
+        {
+            // If there's no data to read, just return
+            if(EAGAIN == errno)
+            {
+                m_offset = 0;
+                m_cnt = 1;
+                return;
+            }
+
+            // Print error and close the socket
+            perror("read error");
+            close(m_fd);
+            m_fd = -1;
+            return;
+        }
+        else if(rdlen == 0)
+        {
+            // reset buf for next message (serial)
+	    // if no characters, this isn't a timeout
+            if(m_offset) printf("read timeout\n");
+            m_offset = 0;
+            m_cnt = 1;
+            return;
+        }
+        else
+        {
+            //if(0 == offset)
+            //    printf("start of message, cnt=%d\n", cnt);
+            //else
+            //    printf("  got %d bytes of %d\n", rdlen, cnt);
+
+            m_cnt = m_buffer[0]; // number of bytes to expect
+            m_offset += rdlen;
+
+            if(m_offset >= m_cnt)
+            {
+                unsigned char chksum = 0;
+
+                // validate checksum
+                //printf("msg :");
+                for(int i=0 ; i < m_cnt ; ++i)
+                {
+                    //printf("%02x ", buffer[i]);
+                    chksum += m_buffer[i];
+                }
+                //printf(" chksum=%02x\n", chksum);
+
+                if((0 == chksum) && (m_cnt > 2)) 
+                {
+                    // process client msg
+                    msgbuf_t msg;
+                    msg.assign(&m_buffer[1], &m_buffer[m_cnt - 1]);
+                    msgbuf_t resp = process_cmd(msg);
+                    send_resp(resp);
+                }
+                else
+                {
+                    printf("checksum failure\n");
+                    for(int i=0 ; i < m_cnt ; ++i)
+                    {
+                        printf("%02x ", m_buffer[i]);
+                        if(i % 16 == 15) printf("\n");
+                    }
+                    printf("\n");
+                }
+
+                // reset for next message
+                m_offset = 0;
+                m_cnt = 1;
+            }
+        }
+    } while(1);
+}
+
+void client_t::send_resp(const msgbuf_t &resp)
+{
+    msgbuf_t cmd = resp; // make copy so we can insert LEN and CHK
+
+    //printf("response len=%02x: ", cmd.size());
+    if(cmd.size())
+    {
+        unsigned char chksum = 0;
+
+        // insert length at start of resp
+        cmd.insert(cmd.begin(), 2 + cmd.size());
+        // compute chksum and push to end of resp
+        for(int i=0 ; i<cmd.size() ; ++i)
+        {
+            //printf("%02x ", cmd[i]);
+            chksum += cmd[i];
+        }
+        cmd.push_back(~chksum + 1);
+        //printf("%02x ", cmd[cmd.size()-1]);
+        write(m_fd, cmd.data(), cmd.size());
+        tcdrain(m_fd);    // delay for output
+    }
+    //printf("\n");
+}
+
 msgbuf_t client_t::process_cmd(const msgbuf_t& msg)
 {
     //printf("process_cmd:\n");
@@ -159,14 +274,14 @@ static string cpm2linux(const char* str, size_t len)
 msgbuf_t client_t::find_first(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     //printf("find_first(%04x)\n", fcb_addr);
 
     reset_fcb(fcb);
 
-    printf("find_first(%04x): open dir '%s'\n", fcb_addr, cwd.c_str());
-    fcb.d = opendir(cwd.c_str());
+    printf("find_first(%04x): open dir '%s'\n", fcb_addr, m_cwd.c_str());
+    fcb.d = opendir(m_cwd.c_str());
 
     // extract the filter
     fcb.filter.clear();
@@ -190,7 +305,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
     msgbuf_t resp(4); // end of directory response
 
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     //printf("find_next(%04x)\n", fcb_addr);
 
@@ -211,7 +326,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
         // search for a file that matches filter
         string name;
         struct stat details;
-		string pathname = cwd + "/" + fcb.local_filename;
+		string pathname = m_cwd + "/" + fcb.local_filename;
         stat(pathname.c_str(), &details);
 
         if(S_ISDIR(details.st_mode))
@@ -326,7 +441,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 msgbuf_t client_t::open_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
 	// look for the file in the current working directory
     msgbuf_t resp = find_first(msg);
@@ -335,21 +450,21 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
 	if(resp[3] == 0xff)
 	{
 printf("open_file: search for file in search path\n");
-		string pushd = cwd; // push current working directory
+		string pushd = m_cwd; // push current working directory
 		for (size_t i = 0; i < search_path.size(); i++)
 		{
 			printf("open_file: search '%s'\n", search_path[i].c_str());
 			// set the current working directory
-			cwd = root_path + search_path[i];
+			m_cwd = root_path + search_path[i];
 			// search new directory
 			resp = find_first(msg);
 			if(resp[3] != 0xff) 
 			{
-				fcb.local_filename = cwd + "/" + fcb.local_filename;
+				fcb.local_filename = m_cwd + "/" + fcb.local_filename;
 				break; // we found the file!
 			}
 		}
-		cwd = pushd; // restore current working directory
+		m_cwd = pushd; // restore current working directory
 	}
 
     resp.resize(4);  // discard short filename and file size
@@ -385,7 +500,7 @@ printf("open_file: search for file in search path\n");
 msgbuf_t client_t::close_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     printf("close_file(%04x, %d) '%s'\n", fcb_addr, fcb.hdl, fcb.local_filename.c_str());
 
@@ -416,7 +531,7 @@ msgbuf_t client_t::close_file(const msgbuf_t& msg)
 msgbuf_t client_t::read_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
     off_t offset = 0;
     bool off_inc = false;
 
@@ -473,7 +588,7 @@ msgbuf_t client_t::read_file(const msgbuf_t& msg)
 msgbuf_t client_t::write_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
     off_t offset = 0;
     bool off_inc = false;
 
@@ -524,7 +639,7 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
 msgbuf_t client_t::create_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     reset_fcb(fcb);
 
@@ -568,7 +683,7 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     msgbuf_t resp = find_first(msg);
 
@@ -610,7 +725,7 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 {
     int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[fcb_addr];
 
     msgbuf_t resp = find_first(msg);
 
@@ -650,7 +765,7 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2+128);
-    string old_path = cwd; // remember current working directory
+    string old_path = m_cwd; // remember current working directory
 
 //    for(size_t i=0 ; i<msg.size() ; ++i)
 //        printf("%02x ", msg[i]);
@@ -677,22 +792,22 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 
     // remember client's new current working directory
     char *d = get_current_dir_name();
-    cwd = d;
+    m_cwd = d;
     free(d);
 
     // is this directory under the root_path?
-    if(strncmp(root_path.c_str(), cwd.c_str(), root_path.length()))
+    if(strncmp(root_path.c_str(), m_cwd.c_str(), root_path.length()))
     {
         // nope. go back to original current working directory
-	cwd = old_path;
-        chdir(cwd.c_str());
+	m_cwd = old_path;
+        chdir(m_cwd.c_str());
     }
 
     // copy new directory into response
-    if(cwd.length() < 128)
-	sprintf((char*)&resp[2], cwd.c_str());
+    if(m_cwd.length() < 128)
+		sprintf((char*)&resp[2], m_cwd.c_str());
     else
-        sprintf((char*)&resp[2], "Directory name too long.");
+		sprintf((char*)&resp[2], "Directory name too long.");
 
     resp.resize(2 + strlen((char*)&resp[2]));
 	

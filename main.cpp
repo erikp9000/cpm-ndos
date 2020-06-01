@@ -48,19 +48,19 @@ extern unsigned long int speed_to_baud (const speed_t& speed);
 extern speed_t baud_to_speed (const int& baud);
 
 // client receive buffer object
-struct client_buf_t {
-    client_buf_t() {
-        offset  = 0;
-        cnt = 1;
-    }
-    unsigned char buffer[512];
-    int offset;
-    int cnt;
-};
+// struct client_buf_t {
+    // client_buf_t() {
+        // offset  = 0;
+        // cnt = 1;
+    // }
+    // unsigned char buffer[512];
+    // int offset;
+    // int cnt;
+// };
 
 // map of file descriptors to client bufs
-typedef std::map<int, client_buf_t> client_buf_map_t;
-client_buf_map_t client_bufs;
+//typedef std::map<int, client_buf_t> client_buf_map_t;
+//client_buf_map_t client_bufs;
 
 int set_interface_attribs(int fd, int baud)
 {
@@ -124,121 +124,10 @@ int set_interface_attribs(int fd, int baud)
 // }
 
 
-void send_resp(const int fd, const msgbuf_t &resp)
-{
-    msgbuf_t cmd = resp; // make copy so we can insert LEN and CHK
-
-    //printf("response len=%02x: ", cmd.size());
-    if(cmd.size())
-    {
-        unsigned char chksum = 0;
-
-        // insert length at start of resp
-        cmd.insert(cmd.begin(), 2 + cmd.size());
-        // compute chksum and push to end of resp
-        for(int i=0 ; i<cmd.size() ; ++i)
-        {
-            //printf("%02x ", cmd[i]);
-            chksum += cmd[i];
-        }
-        cmd.push_back(~chksum + 1);
-        //printf("%02x ", cmd[cmd.size()-1]);
-        write(fd, cmd.data(), cmd.size());
-        tcdrain(fd);    // delay for output
-    }
-    //printf("\n");
-}
 
 
-void recv_request(client_t & client)
-{
-    client_buf_t &cbuf = client_bufs[client.fd];
 
-    int fd = client.fd;
-    unsigned char * buf = cbuf.buffer;
-    int & offset = cbuf.offset;
-    int & cnt = cbuf.cnt;
 
-    do {
-//printf("recv_request (%d) entered\n", fd);
-        int rdlen = read(fd, buf + offset, cnt - offset);
-//printf("recv_request (%d) read returned (%d)\n", fd, rdlen);
-
-        if(rdlen < 0)
-        {
-            // If there's no data to read, just return
-            if(EAGAIN == errno)
-            {
-                offset = 0;
-                cnt = 1;
-                return;
-            }
-
-            // Print error and close the socket
-            perror("read error");
-            close(fd);
-            client.fd = -1;
-            client_bufs.erase(fd);
-            return;
-        }
-        else if(rdlen == 0)
-        {
-            // reset buf for next message (serial)
-	    // if no characters, this isn't a timeout
-            if(offset) printf("read timeout\n");
-            offset = 0;
-            cnt = 1;
-            return;
-        }
-        else
-        {
-            //if(0 == offset)
-            //    printf("start of message, cnt=%d\n", cnt);
-            //else
-            //    printf("  got %d bytes of %d\n", rdlen, cnt);
-
-            cnt = buf[0]; // number of bytes to expect
-            offset += rdlen;
-
-            if(offset >= cnt)
-            {
-                unsigned char chksum = 0;
-
-                // validate checksum
-                //printf("msg :");
-                for(int i=0 ; i < cnt ; ++i)
-                {
-                    //printf("%02x ", buf[i]);
-                    chksum += buf[i];
-                }
-                //printf(" chksum=%02x\n", chksum);
-
-                if((0 == chksum) && (cnt > 2)) 
-                {
-                    // process client msg
-                    msgbuf_t msg;
-                    msg.assign(&buf[1], &buf[cnt - 1]);
-                    msgbuf_t resp = client.process_cmd(msg);
-                    send_resp(fd, resp);
-                }
-                else
-                {
-                    printf("checksum failure\n");
-                    for(int i=0 ; i < cnt ; ++i)
-                    {
-                        printf("%02x ", buf[i]);
-                        if(i % 16 == 15) printf("\n");
-                    }
-                    printf("\n");
-                }
-
-                // reset for next message
-                offset = 0;
-                cnt = 1;
-            }
-        }
-    } while(1);
-}
 
 
 void read_config()
@@ -264,9 +153,11 @@ void read_config()
 		// set search path
 		Value& path = config["path"];
 		// print search path
+		printf("search path is:\n");
+
 		for (SizeType i = 0; i < path.Size(); i++)
 		{
-			printf("a[%d] = %s\n", i, path[i].GetString());
+			printf("    %s\n", path[i].GetString());
 			search_path.push_back(path[i].GetString());
 		}
 		
@@ -302,7 +193,7 @@ void read_config()
 	}
 	else
 	{
-		printf("JSON parse error: %s (%u)\n",
+		printf("JSON parse error: %s (%l)\n",
 			GetParseError_En(ok.Code()), ok.Offset());
 	}
 }
@@ -355,11 +246,11 @@ int main()
             ++it)
         {
             // don't add this client if the file descriptor is invalid
-            if(it->second.fd != -1)
+            if(it->second != -1)
             {
-                FD_SET(it->second.fd, &readfds);
-                if(it->second.fd > max_fds)
-                    max_fds = it->second.fd;
+                FD_SET(it->second, &readfds);
+                if(it->second > max_fds)
+                    max_fds = it->second;
             }
         }
 
@@ -401,8 +292,8 @@ int main()
             // generate any signal when the other side of a TCP socket
             // disappears without a proper close socket negotiation.
             // Yep. Tried passing exception fds to select().
-            if((client.fd != -1) && (fd != client.fd))
-                close(client.fd);
+            if((client != -1) && (fd != client))
+                close(client);
 
 	    client.init(fd, client_name, root_path);
             //client.fd = fd;
@@ -414,11 +305,11 @@ int main()
                 it != client_map.end() ;
                 ++it)
             {
-                if(FD_ISSET(it->second.fd, &readfds))
+                if(FD_ISSET(it->second, &readfds))
                 {
                     //printf("Got data, IP address(%d): %s\n",
                     //    it->second.fd, it->second.name.c_str());
-                    recv_request(it->second);
+                    it->second.recv_request();
                 }
             }
         }

@@ -49,24 +49,29 @@ typedef std::map<uint16_t,fcb_t> fcb_map_t;
 class client_t {
 public:
     client_t() {
-        cwd = ".";
-        fd = -1;
+        m_cwd = ".";
+        m_fd = -1;
     }
     virtual ~client_t() {}
 
-    msgbuf_t process_cmd(const msgbuf_t& msg);
+	void recv_request();
 
-    void init(int _fd, string _name, string _root) {
-        fd = _fd;
-        if(_name.length()) name = _name;
-        if(cwd == ".") cwd = _root;
+    void init(int fd, string name, string root) {
+        m_fd = fd;
+        if(name.length()) m_name = name;
+        if(m_cwd == ".") m_cwd = root;
     }
 
-    operator int() const { return fd; }
-    int fd;           // I/O file descriptor for receiving & sending messages
+    string name() { return m_name; }
+	
+    operator int() const { return m_fd; }
 
 
 protected:
+	void send_resp(const msgbuf_t &resp);
+
+    msgbuf_t process_cmd(const msgbuf_t& msg);
+
     msgbuf_t open_file(const msgbuf_t& msg);
     msgbuf_t close_file(const msgbuf_t& msg);
     msgbuf_t find_first(const msgbuf_t& msg);
@@ -88,10 +93,16 @@ private:
     int get_fcb_addr(const msgbuf_t& msg);
 
 private:
-    string cwd;  // current working directory
-    fcb_map_t fcbs;  // file control block map
+    string m_cwd;  // current working directory
+    fcb_map_t m_fcbs;  // file control block map
 
-    string name; // IP address of the client or serial port device name
+    int m_fd;           // I/O file descriptor for receiving & sending messages
+    string m_name; // IP address of the client or serial port device name
+	
+	// receive buffer
+	unsigned char m_buffer[512];
+    int m_offset;
+    int m_cnt;
 };
 
 

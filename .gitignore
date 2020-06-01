@@ -4,3 +4,9 @@ ndos-srv
 *.hex
 *.bak
 *.com
+*.lib
+*.PRN
+*.HEX
+*.BAK
+*.COM
+*.LIB
