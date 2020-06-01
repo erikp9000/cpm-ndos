@@ -85,7 +85,7 @@ speed_t string_to_speed (const string& str)
 {
   int i;
 
-  for (i = 0; !speeds[i].name.empty() ; ++i)
+  for (i = 0 ; !speeds[i].name.empty() ; ++i)
     if (str == speeds[i].name)
       return speeds[i].speed;
   return (speed_t) -1;
@@ -95,7 +95,7 @@ unsigned long int speed_to_baud (const speed_t& speed)
 {
   int i;
 
-  for (i = 0; !speeds[i].name.empty() ; ++i)
+  for (i = 0 ; !speeds[i].name.empty() ; ++i)
     if (speed == speeds[i].speed)
       return speeds[i].baud;
   return 0;
@@ -105,7 +105,7 @@ speed_t baud_to_speed (const int& baud)
 {
   int i;
 
-  for (i = 0; speeds[i].baud != 0; ++i)
+  for (i = 0 ; !speeds[i].name.empty() ; ++i)
     if (baud == speeds[i].baud)
       return speeds[i].speed;
   return (speed_t) -1;

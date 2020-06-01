@@ -28,6 +28,7 @@
 #include <iostream>
 #include "rapidjson/istreamwrapper.h"
 #include <fstream>
+#include "rapidjson/error/en.h"
  
 using namespace rapidjson;
 using namespace std;
@@ -264,7 +265,7 @@ int main()
 			string port = serial_ports[i]["port"].GetString();
 			int baud = serial_ports[i]["baud"].GetInt();
 			
-			//printf("port=%s baud=%d\n", port, baud);
+			printf("port=%s baud=%d\n", port.c_str(), baud);
 			
 			int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
 			if (fd < 0) {
@@ -285,6 +286,11 @@ int main()
             client.fd = fd;
             client.name = port;
 		}
+	}
+	else
+	{
+		printf("JSON parse error: %s (%u)\n",
+			GetParseError_En(ok.Code()), ok.Offset());
 	}
 	
     struct sockaddr_in my_addr, peer_addr;
