@@ -1,7 +1,7 @@
 # cpm-ndos
 
 NDOS (Network Disk Operating System) is a terminate-and-stay-resident (TSR) 
-program for CP/M 2.2 which adds a network drive (P:) over a serial port. The 
+program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial port. The 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
@@ -12,6 +12,11 @@ and MP/M doesn't support directories like a modern system. I figured, if I was
 going to write an MP/M replacement, why not start fresh? Also, I was intrigued
 by the challenge.
 
+
+## Required Build tools
+
+  - ASM.COM and LOAD.COM (on CP/M client)
+  - G++ (on server)
 
 ## Architecture
 
@@ -36,19 +41,17 @@ There are also several CP/M utilities:
 
   - The CCP converts all command-line characters to upper-case and ndos-srv 
     converts them back to lower-case. Therefore, server directories with 
-	upper-case characters cannot entered from NDOS though they can be seen in 
-	their proper case by the CCP DIR command.
+    upper-case characters cannot be entered from NDOS though they can be seen 
+    in their proper case by the CCP DIR command.
 
   - Filenames that don't comply with the 8.3 convention are truncated by 
     ndos-srv before returning them to NDOS. This means that long filenames on
-	the server cannot be opened from NDOS.
+    the server cannot be opened from NDOS.
 
   - Directory names longer than 9 characters are truncated by ndos-srv so the 
     full name is not viewable from NDOS though CD can still move into long-
-	named directories.
+    named directories.
 
-  - Support for raw serial ports is temporarily not supported.
-  
   - The Network I/O System (NIOS) is built into the NDOS and requires
     customization for the target system serial port.
   
