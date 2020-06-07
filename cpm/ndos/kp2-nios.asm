@@ -3,11 +3,12 @@
 ;; KP2-NIOS.ASM   [Kaypro 2X, should work with II/2/IV/4/10]
 ;;
 ;; To build KP2-NIOS.SPR:
-;;   RMAC KP2-NIOS
+;;   RMAC KP2-NIOS $PZ SZ
 ;;   LINK KP2-NIOS[OS]
 ;;
 ;; The Kaypro NIOS uses the 'J4 SERIAL DATA I/O' RS-232 port
-;; to communicate with the file server.
+;; to communicate with the file server. The default rate is
+;; 19.2Kbps (max).
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -124,7 +125,8 @@ CMDPORT		equ	6       ; command/status on 'J4 SERIAL DATA I/O'
   ; RD2 interrupt vector
   
         ;
-	; jump table used by NDOS to access network functions
+	; Jump table used by NDOS to access network functions
+        ; (Don't put any code/data before these or NDOS will be broken.)
         ;
 	jmp	init
 	jmp	smsg

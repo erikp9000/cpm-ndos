@@ -3,7 +3,7 @@
 ;; NDOS.ASM
 ;; 
 ;; To build NDOS.SPR:
-;;   RMAC NDOS
+;;   RMAC NDOS $PZ SZ
 ;;   LINK NDOS[OS]
 ;;
 ;; This file assembles to NDOS.SPR which is a page relocatable

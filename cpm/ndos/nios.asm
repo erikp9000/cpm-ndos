@@ -3,18 +3,22 @@
 ;; NIOS.ASM       [stub]
 ;;
 ;; To build NIOS.SPR:
-;;   RMAC NIOS
+;;   RMAC NIOS $PZ SZ
 ;;   LINK NIOS[OS]
 ;;
 ;; The NIOS implements the hardware-specific functions
-;; required to communicate with the ndos-srv.
+;; required to communicate with the ndos-srv. This is 
+;; the default NIOS loaded by the LDNDOS loader. It can
+;; be used to test loading/unloading of NDOS on the target
+;; system before developing NIOS.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	maclib	ndos
 
         ;
-	; jump table used by NDOS to access network functions
+	; Jump table used by NDOS to access network functions
+        ; (Don't put anything before these or NDOS will be broken.)
         ;
 	jmp init
 	jmp smsg

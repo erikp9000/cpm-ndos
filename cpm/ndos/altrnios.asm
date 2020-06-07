@@ -1,13 +1,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; ALTRNIOS.ASM   [Altair 8800 w/88 2SIO serial port]
+;; ALTRNIOS.ASM   [Altair 8800 w/88-2SIO serial port]
 ;;
 ;; To build ALTRNIOS.SPR:
-;;   RMAC ALTRNIOS
+;;   RMAC ALTRNIOS $PZ SZ
 ;;   LINK ALTRNIOS[OS]
 ;;
-;; The NIOS implements the hardware-specific functions
-;; required to communicate with the ndos-srv.
+;; The Altair 8800 NIOS uses the second serial port on the 
+;; 88-2SIO to communicate with the file server. The baud
+;; rate is jumper configurable; 9600 bps is the highest rate.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -37,7 +38,8 @@ SIODATA	equ	13h		; data register (read/write)
 RECVTMO	equ	32768
 
         ;
-	; jump table used by NDOS to access network functions
+	; Jump table used by NDOS to access network functions
+        ; (Don't put any code/data before these or NDOS will be broken.)
         ;
 	jmp	init
 	jmp	smsg
