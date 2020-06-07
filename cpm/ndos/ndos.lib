@@ -1,0 +1,73 @@
+
+;
+; Standard CP/M 2.2 data structures
+;
+warmv       equ 0000h       ; the BIOS vector
+cdisk       equ 0004h       ; the current disk
+bdosv       equ 0005h       ; the BDOS vector
+deffcb      equ 005ch       ; the default FCB
+defdma      equ 0080h       ; the default DMA buffer
+tpa         equ 0100h       ; start of Transient Program Area
+
+cr          equ 0dh
+lf          equ 0ah
+
+;
+; Some standard BDOS functions we use
+;
+conin       equ 1
+conout      equ 2
+prnstr      equ 9
+constat     equ 0bh
+rstdsk      equ 0dh
+openf       equ 0fh
+closef      equ 10h
+fndfst      equ 11h
+fndnxt      equ 12h
+readf       equ 14h
+writef      equ 15h
+creatf      equ 16h
+setdma      equ 1ah
+
+
+;
+; The NDOS function code extensions to BDOS
+;
+n?ver       equ 40h         ; returns NDOS version as major.minor, packed BCD in A
+n?smsg      equ 41h         ; sends packet referenced by DE, HL=A=0(success)/FF(timeout)
+n?rmsg      equ 42h         ; returns recvd packet in DE, HL=A=0(success)/FF(timeout)
+n?stats     equ 43h         ; return HL pointing to NDOS packet counters
+n?init      equ 44h         ; initialize the network stack, HL=A=0(success)/FF(timeout)
+
+
+;
+; NDOS entry points (offsets from NDOS page @bdosv+2)
+;
+NDOSENT     equ 6           ; standard entry
+NDOSCOLD    equ 9           ; cold start, hook vectors & init NIOS
+NDOSWARM    equ 12          ; load CCP.COM
+BDOSORG     equ 15          ; JMP to original BDOS
+BIOSORG     equ 18          ; JMP to original BIOS warm start
+NDOSKILL    equ 21          ; Unload NDOS & restore vectors
+
+
+;
+; NDOS message format:  |LEN|CMD|DATA ...|CHK|
+;  LEN includes LEN and CHK
+;  CHK is 2's complement of sum of bytes from LEN to CHK-1
+;
+;  CMD codes are:
+;
+NFNDFST     equ 02h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NFNDNXT     equ 04h         ; DATA is |FCBlo|FCBhi|
+NOPENF      equ 06h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NCLOSEF     equ 08h         ; DATA is |FCBlo|FCBhi|
+NDELETF     equ 0Ah         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NREADF      equ 0Ch         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|
+NWRITEF     equ 0Eh         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|Datax128|
+NCREATF     equ 10h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NRENAMF     equ 12h         ; DATA is |NAMEx8|EXTx3|NAMEx8|EXTx3|
+NCHDIR      equ 20h         ; DATA is |Pathv128|
+NMKDIR      equ 22h         ; DATA is |Pathv128|
+NRMDIR      equ 24h         ; DATA is |Pathv128|
+NECHO       equ 30h         ; DATA is |Datav128|
