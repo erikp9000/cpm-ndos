@@ -447,4 +447,3 @@ fixuptbl:
 	dw 079Ah
 endfixup:
 	end
-

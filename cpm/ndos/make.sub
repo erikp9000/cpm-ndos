@@ -1,12 +1,20 @@
-a:asm ndos
-a:load ndos
-a:asm cd
-a:load cd
-a:asm mkdir
-a:load mkdir
-a:asm rmdir
-a:load rmdir
-a:asm necho
-a:load necho
-a:asm nstat
-a:load nstat
+rmac ndos $$pz sz
+link ndos[os]
+rmac nios $$pz sz
+link nios[os]
+rmac altrnios $$pz sz
+link altrnios[os]
+rmac kp2-nios $$pz sz
+link kp2-nios[os]
+mac ldndos $$pz sz
+load ldndos
+mac cd $$pz sz
+load cd
+mac mkdir $$pz sz
+load mkdir
+mac rmdir $$pz sz
+load rmdir
+mac necho $$pz sz
+load necho
+mac nstat $$pz sz
+load nstat

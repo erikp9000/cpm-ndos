@@ -5,8 +5,12 @@ ndos-srv
 *.bak
 *.com
 *.lib
+*.rel
+*.spr
 *.PRN
 *.HEX
 *.BAK
 *.COM
 *.LIB
+*.REL
+*.SPR

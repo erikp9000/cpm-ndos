@@ -13,57 +13,16 @@
 ;; On a=0(success), print response.
 ;; On a=0FFh(failure), print error.
 ;;
+	maclib  ndos
 
-warmv	equ 0000h
-cdisk	equ 0004h
-bdosv	equ 0005h
-dmabuf	equ 0080h
-tpa	equ 0100h
+	org     tpa
 
-cr	equ 0dh
-lf	equ 0ah
+start:	lxi     h,0
+        dad     sp              ; hl = sp
+        shld    savestack       ; save original stack pointer
+        lxi     sp,stack
 
-;; BDOS function codes
-conin	equ 1
-conout	equ 2
-prnstr	equ 9
-constat	equ 0bh
-openf	equ 0fh
-closef	equ 10h
-fndfst	equ 11h
-fndnxt	equ 12h
-readf	equ 14h
-writef	equ 15h
-creatf	equ 16h
-setdma	equ 1ah
-
-; NDOS function codes
-ndosver	equ 40h
-sendmsg	equ 41h
-recvmsg	equ 42h
-
-; NDOS CMD codes 
-nfndfst	equ 002h
-nfndnxt	equ 004h
-nopen	equ 006h
-nclose	equ 008h
-ndelet	equ 00ah
-nread	equ 00ch
-nwrite	equ 00eh
-ncreat	equ 010h
-nrenam	equ 012h
-ncwd	equ 020h
-nmkdir	equ 022h
-nrmdir	equ 024h
-necho	equ 030h
-
-	org 0100h
-
-start:	
-;	lxi h,stack
-;	sphl
-
-	mvi c,ndosver
+	mvi c,n?ver
 	call bdosv
 	cpi 10h
 	jc nondos
@@ -72,7 +31,7 @@ start:
 
 	; copy command line args from dmabuf
 	lxi d,msgbuf+2	; point to start of data
-	lxi h,dmabuf	; command-line
+	lxi h,defdma	; command-line
 	mov a,m		; command-line length
 	ora a
 	jz dousage
@@ -84,16 +43,16 @@ loop:	inx h
 	dcr c
 	jnz loop
 
-	lda dmabuf
+	lda defdma
 	adi 3		; include LEN, CMD, and CHK bytes
 	sta msgbuf
 
 loop1:
-	mvi c,sendmsg 
+	mvi c,n?smsg
 	lxi d,msgbuf
 	call bdosv		; send message to server
 
-	mvi c,recvmsg
+	mvi c,n?rmsg
 	lxi d,buffer
 	call bdosv		; get response
 
@@ -123,30 +82,36 @@ loop1:
 	jz loop1        
 	mvi c,conin
 	call bdosv		; remove the keypress so it's not waiting for the CCP
-	
-	ret
+        jmp quit
 	
 	; NDOS not found
 	
 nondos:	mvi c,prnstr
 	lxi d,nondoserr
-	jmp bdosv
+	call bdosv
+        jmp quit
 
 	; Timeout contacting server
 timeout:mvi c,prnstr
 	lxi d,toerr
-	jmp bdosv
+	call bdosv
+        jmp quit
 
 	; Error status from server
 serverr:mvi c,prnstr
 	lxi d,serr
-	jmp bdosv
+	call bdosv
+        jmp quit
 
 	; Print usage
 dousage: mvi c, prnstr
 	lxi d,usage
-	jmp bdosv
+	call bdosv
 	
+quit:   lhld    savestack
+        sphl                    ; sp = hl
+        ret                     ; quit
+     
 nondoserr:
 	db 'NDOS not loaded',cr,lf,'$'
 
@@ -159,12 +124,16 @@ crlf:	db cr,lf,'$'
 
 ;; NDOS request message
 msgbuf: db 0		; LEN
-	db necho	; CMD
+	db NECHO	; CMD
 	ds 148		; DATA and CHK
 
 ;; NDOS response buffer
 buffer:	ds 150
 
-;stack:	ds 256
+savestack:
+        dw 0
+        
+        ds 16
+stack:	
 
         end start
