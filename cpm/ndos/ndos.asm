@@ -55,6 +55,14 @@ NIOSSMSG	equ	3
 NIOSRMSG	equ	6
 NIOSSTAT	equ	9
 
+FCB?EX		equ	12	; extent (0-31)
+FCB?S2		equ	14	; extent counter (0-15)
+FCB?RC		equ	15	; records used in this extent (0-127)
+FCB?CR		equ	32	; current record in this extent (0-127)
+FCB?R0		equ	33	; low-byte of random record #
+FCB?R1		equ	34	; high-byte of random record #
+FCB?R2		equ	35 	; overflow of R1
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Resident Network DOS image starts here
@@ -92,11 +100,11 @@ fcb:
 	db	0 ; cr
 
 noccpmsg:
-	db	'CCP.COM not found',cr,lf
+	db	cr,lf,'CCP.COM not found',cr,lf
 	db	'$'
 
 filed:
-	db	'CCP.COM loaded',cr,lf
+	db	cr,lf,'CCP.COM loaded',cr,lf
 	db	'$'
 
 panicmsg:
@@ -251,9 +259,9 @@ warm:   lxi sp,stack	; set stack pointer
 	mvi a,76h	; opcode for HLT
 	sta tpa		; store HLT in TPA in case load fails
 	xra a
-	sta fcb+32	; cr=0
 	mvi c,openf
 	lxi d,fcb
+	call resetfcb	; set S2=EX=CR=0
 	call bdosadr
 	inr a
 	jz noccp
@@ -295,13 +303,7 @@ done:
 	mvi c,6
 	lxi h,backupser ; backup serial number
 	lxi d,firstaddr	; start of NDOS
-serloop:
-	mov a,m
-	stax d
-	inx h
-	inx d
-	dcr c
-	jnz serloop
+	call copybytes
 
 	jmp tpa		; start CCP
 
@@ -428,7 +430,7 @@ gonios:	lxi	h,savestatus
 
 savestatus:
 	shld	status		; save status
-	ret
+	ret			; a = 0(success)/FF(failure)
 
 
 	;
@@ -613,13 +615,9 @@ copynamedma:
 	stax d		; set user code to 0
 	lxi h,rbuf+5	; hl is source
 	mvi c,15	; get filename, extension, ex, s1, s2, & rc
-cpyfn1:
 	inx d
-	mov a,m		; get byte from rbuf
-	stax d		; write to DMA
-	inx h
-	dcr c
-	jnz cpyfn1
+	call copybytes
+
 	; Fill the FCB allocation vector assuming that a block is 1024 bytes
 	; and that we are using 8-bit block numbers (DSM < 256).
 	; This enables STAT.COM to show the file size.
@@ -674,7 +672,8 @@ less:
 	adi '0'
 	ret
 
-; send sbuf and get response into rbuf - if there is an error on receive, the request is retried
+; send sbuf and get response into rbuf - if there is an error on receive,
+; the request is retried.
 ; This only works because all requests are idempotent, even read & write
 ; because they include the seek offset in the request.
 xcv:
@@ -682,9 +681,9 @@ xcv:
 xcv2:
         push b          ; save retry counter
 	lxi d,sbuf
-	call smsg
+	call smsg	; updates status, a = 0(success)/FF(timeout)
 	lxi d,rbuf
-	call rmsg	; a = 0(success)/FF(timeout)
+	call rmsg	; updates status, a = 0(success)/FF(timeout)
 	pop b           ; restore retry counter
 	ora a
 	rz		; success
@@ -694,69 +693,112 @@ xcv2:
 
 ; reset record offset params in user's FCB, de = FCB address
 resetfcb:
-	lxi h,12	; EX
+	xra a
+	lxi h,FCB?EX
 	dad d
-	mvi m,0
-	lxi h,14	; S2
+	mov m,a
+	lxi h,FCB?S2
 	dad d
-	mvi m,0
-	lxi h,32	; CR
+	mov m,a
+	lxi h,FCB?CR
 	dad d
-	mvi m,0
+	mov m,a
 	ret
 
 ; advance record offset params in user's FCB, de = FCB address
 advfcb:
 	lhld params
 	xchg
-	lxi h,32	; CR
+	lxi h,FCB?CR
 	dad d
-	inr m
-	rp		; return if < 128
-	mvi m,0
-	lxi h,12	; EX
-	dad d
-	inr m
-	mov a,m
-	ani 20h
-	rz		; return if < 32
-	mvi m,0
-	lxi h,14	; S2
-	dad d
-	inr m
+	inr m		; most-sig bit selects next extent on read/write
 	ret	
 
 ; get FCB record count, compute and return file offset in bc
 getoffset:
 	lhld params
 	xchg		; de = FCB
-	lxi h,32	; CR
-	dad d
+	lxi h,FCB?CR
+	dad d		; hl points to CR
 	mov a,m
-	ani 7fh
-	mov c,a
-	lxi h,12	; EX
+	mov c,a		; c = current record
+	ora a
+	jp getoff1      ; check for overflow of CR
+	;
+	; on overflow of CR, select next extent
+	mvi m,0		
+	mvi c,0		; c = record 0 of new extent
+	lxi h,FCB?EX
 	dad d
+        inr m		; select next EX
+	mov a,m
+	ani 20h		; check for overflow
+	jz getoff1
+	mvi m,0		; clear overflow of EX
+	lxi h,FCB?S2
+	dad d
+	inr m		; increment S2
+
+        ; c = current record modulus 128, now combine S2 and EX into b and move LSB of EX into c
+getoff1:
+	lxi h,FCB?EX
+	dad d		; hl points to EX
 	mov a,m
 	ani 1fh
-	rar		; lsb in carry
-	mov b,a
+	clc
+	rar		; lsb of EX in carry
+	mov b,a		; b is now most sig. 4-bits of EX
 	jnc getoff2
 	mov a,c
-	ori 80h
+	ori 80h		; c = ((EX & 1)<<7) | (CR & 7Fh)
 	mov c,a
 getoff2:
-	lxi h,14	; S2
-	dad d
+	lxi h,FCB?S2
+	dad d		; hl points to S2
 	mov a,m
 	rlc
 	rlc
 	rlc
 	rlc
-	ani 0f0h
+	ani 0f0h	; a = S2 << 4
 	ora b
-	mov b,a
+	mov b,a		; b = (S2 << 4) | (EX >> 1)
 	ret	
+
+; return bc = random record counter from FCB
+; update FCB S2, EX, and CR
+getroffset:
+	lhld	params
+	xchg			; de = FCB
+	lxi	h,FCB?R0
+	dad	d		; hl points to R0
+	mov	c,m		; c = R0
+	inx	h
+	mov	b,m		; b = R1
+	; TODO R2 is overflow from R1, we should return an error if R2 is non-zero...
+	lxi	h,FCB?CR
+	dad	d		; hl points to CR
+	mov	a,c
+	ani	07Fh
+	mov	m,a		; save CR
+	lxi	h,FCB?EX
+	dad	d		; hl points to EX
+	mov	a,c
+	ral			; carry is most-sig bit of CR
+	mov	a,b
+	ral			; shift carry into EX
+	ani	1Fh
+	mov	m,a		; save EX
+	lxi	h,FCB?S2
+	dad	d		; hl points to S2
+	mov	a,b
+	rar
+	rar
+	rar
+	rar
+	ani	0Fh
+	mov	m,a		; save S2
+	ret
 
 ; setup network send buffer
 ;   call with b=length, c=network command byte, de=FCB address
@@ -967,39 +1009,44 @@ closefv:
 	;     a = 0(success)/1(end of file)/FF(failure)
 	;
 readfv:
-	call isnetdsk	; doesn't return if not network disk
+	call	isnetdsk	; doesn't return if not network disk
+	call	getoffset	; bc = file offset from FCB S2,EX,CR
+	call	netread
+	rnz			; error
+	jmp	advfcb		; auto-advance the FCB record counters
 
-	mvi b,7		; message length
-	mvi c,NREADF	; network command
+	; send network file read, bc=file offset
+netread:
+	push	b
+	mvi	b,7		; message length
+	mvi	c,NREADF	; network command
 	; de contains FCB address (which we use as a file handle)
 
-	call setupbuf	; setup sbuf header
+	call	setupbuf	; setup sbuf header
 
-	call getoffset	; get file offset in bc
-	mov a,c
-	sta sbuf+4
-	mov a,b
-	sta sbuf+5
+	pop	b		; get file offset in bc
+	mov	a,c
+	sta	sbuf+4
+	mov	a,b
+	sta	sbuf+5
 
-	call xcv	; transmit sbuf & get response in rbuf
-	ora a
-	rnz		; xcv sets status
+	call	xcv		; transmit sbuf & get response in rbuf
+	ora	a
+	rnz			; xcv sets status
 
-	lda rbuf+4	; status from server
-	ora a
-	sta status
-	rnz		;jnz return	; return error code
+	lda	rbuf+4		; status from server
+	sta	status
+	ora	a		; set/clear Z flag
+ 	rnz			; return error code
 
 	; copy 128 bytes starting at rbuf+5 to DMA address
-	mvi c,128	; # bytes to copy
-	lxi d,rbuf+5	; source
-	lhld dmaaddr	; destination
-	xchg		; de=destination, hl=source
-	call copybytes	; copy c bytes from de to hl
-
-	call advfcb	; increment record offset in FCB
+	mvi	c,128		; # bytes to copy
+	lxi	d,rbuf+5	; source
+	lhld	dmaaddr		; destination
+	xchg			; de=destination, hl=source
+	call	copybytes	; copy c bytes from de to hl
+	xra	a
 	ret
-
 
 	;
 	; Write file
@@ -1010,37 +1057,39 @@ readfv:
 	;     a = 0(success)/FF(error)
 	;
 writefv:
-	call isnetdsk	; doesn't return if not network disk
+	call	isnetdsk	; doesn't return if not network disk
+	call	getoffset	; bc = file offset from FCB S2,EX,CR
+	call	netwrite	; returns a = status
+	rnz			; error
+	jmp	advfcb		; auto-advance FCB to next record 
 
-writef1:
-	mvi b,135	; message length
-	mvi c,NWRITEF	; network command
+netwrite:
+	push	b		; save file offset
+	mvi	b,135		; message length
+	mvi	c,NWRITEF	; network command
 	; de contains FCB address (which we use as a file handle)
 	
-	call setupbuf	; setup sbuf header
+	call	setupbuf	; setup sbuf header
 	
-	call getoffset	; get file offset in bc
-	mov a,c
-	sta sbuf+4
-	mov a,b
-	sta sbuf+5
+	pop	b		; get file offset in bc
+	mov	a,c
+	sta	sbuf+4
+	mov	a,b
+	sta	sbuf+5
 
 	; copy 128 bytes starting at DMA address to sbuf+6
-	mvi c,128	; # bytes to copy
-	lhld dmaaddr	; source
-	lxi d,sbuf+6	; destination
-	call copybytes
+	mvi	c,128		; # bytes to copy
+	lhld	dmaaddr		; source
+	lxi	d,sbuf+6	; destination
+	call	copybytes
 
-	call xcv	; send sbuf, get response in rbuf
+	call	xcv		; send sbuf, get response in rbuf
 
-	ora a		; a=0(success)/FF(timeout)
-	rnz		; error
-	lda rbuf+4	; status from server
-	ora a
-	sta status
-	rnz		; error
-
-	call advfcb	; advance current record counter in FCB
+	ora	a		; a=0(success)/FF(timeout)
+	rnz			; error
+	lda	rbuf+4		; status from server
+	sta	status
+	ora	a		; set/clear Z flag
 	ret
 
 
@@ -1088,7 +1137,7 @@ setrrv:
 	call getoffset	; get file offset in bc
 
 	; Store bc in r0(33),r1(34),r2(35) in FCB
-	lxi h,33	; offset to r0
+	lxi h,FCB?R0	; offset to r0
 	dad d
 	mov m,c		; low-byte
 	inx h
@@ -1107,6 +1156,7 @@ setrrv:
 	;     random record fields in FCB
 	;
 getszv:
+	jmp	panic
 
 
 	;
@@ -1118,6 +1168,7 @@ getszv:
 	;     a = 0(success)/FF(error)
 	;
 setatrv:
+	jmp	panic
 
 
 
@@ -1130,6 +1181,9 @@ setatrv:
 	;     a = 0(success)/FF(error)
 	;
 readrv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getroffset	; bc = file offset from FCB R0,R1,R2
+	jmp	netread
 
 
 	;
@@ -1141,6 +1195,9 @@ readrv:
 	;     a = 0(success)/FF(error)
 	;
 writerv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getroffset	; bc = file offset from FCB R0,R1,R2
+	jmp	netwrite
 
 
 	;
@@ -1152,10 +1209,11 @@ writerv:
 	;     a = 0(success)/FF(error)
 	;
 wrtrfv:
+	jmp	panic
 
 
 	; Panic exit
-	call isnetdsk	; doesn't return if not network disk
+panic:	call isnetdsk	; doesn't return if not network disk
 
 	mov a,c		; convert function code to hexadecimal
 	rrc

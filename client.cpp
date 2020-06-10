@@ -671,7 +671,10 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
     resp[1] = msg[1];
     resp[2] = msg[2];
 
-    fcb.hdl = creat(filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    //creat() opens the file with 0_WRONLY which breaks Random File Access!
+    //fcb.hdl = creat(filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    fcb.hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
     printf("create_file(%04x, %d) '%s' ", fcb_addr, fcb.hdl, filename.c_str());
 
