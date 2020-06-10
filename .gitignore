@@ -7,6 +7,7 @@ ndos-srv
 *.lib
 *.rel
 *.spr
+*.sym
 *.PRN
 *.HEX
 *.BAK
@@ -14,3 +15,4 @@ ndos-srv
 *.LIB
 *.REL
 *.SPR
+*.SYM
