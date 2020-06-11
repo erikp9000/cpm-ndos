@@ -168,7 +168,7 @@ server-side of the NDOS Protocol. It supports multiple clients (CP/M machines).
 JSON format.
 
     { 
-      "root": "cpm"],
+      "root": "cpm",
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
         { "port": "/dev/ttyAMA0", "baud": 9600 },
