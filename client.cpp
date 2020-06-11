@@ -10,6 +10,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#undef DEBUG
 
 // This function manages the receive buffer for a client.
 // Here a request is assembled and if the checksum is valid,
@@ -19,9 +20,13 @@
 void client_t::recv_request()
 {
     do {
-//printf("recv_request (%d) entered\n", m_fd);
+#ifdef DEBUG		
+		printf("recv_request (%d) entered\n", m_fd);
+#endif
         int rdlen = read(m_fd, m_buffer + m_offset, m_cnt - m_offset);
-//printf("recv_request (%d) read returned (%d)\n", fd, rdlen);
+#ifdef DEBUG
+		printf("recv_request (%d) read returned (%d)\n", m_fd, rdlen);
+#endif
 
         if(rdlen < 0)
         {
@@ -50,10 +55,12 @@ void client_t::recv_request()
         }
         else
         {
-            //if(0 == offset)
-            //    printf("start of message, cnt=%d\n", cnt);
-            //else
-            //    printf("  got %d bytes of %d\n", rdlen, cnt);
+#ifdef DEBUG
+            if(0 == m_offset)
+                printf("start of message, cnt=%d\n", m_cnt);
+            else
+                printf("  got %d bytes of %d\n", rdlen, m_cnt);
+#endif
 
             m_cnt = m_buffer[0]; // number of bytes to expect
             m_offset += rdlen;
@@ -63,13 +70,19 @@ void client_t::recv_request()
                 unsigned char chksum = 0;
 
                 // validate checksum
-                //printf("msg :");
+#ifdef DEBUG				
+                printf("msg :");
+#endif
                 for(int i=0 ; i < m_cnt ; ++i)
                 {
-                    //printf("%02x ", buffer[i]);
+#ifdef DEBUG				
+                    printf("%02x ", m_buffer[i]);
+#endif
                     chksum += m_buffer[i];
                 }
-                //printf(" chksum=%02x\n", chksum);
+#ifdef DEBUG				
+                printf(" chksum=%02x\n", chksum);
+#endif
 
                 if((0 == chksum) && (m_cnt > 2)) 
                 {
@@ -102,7 +115,9 @@ void client_t::send_resp(const msgbuf_t &resp)
 {
     msgbuf_t cmd = resp; // make copy so we can insert LEN and CHK
 
-    //printf("response len=%02x: ", cmd.size());
+#ifdef DEBUG				
+    printf("response len=%02x: ", cmd.size());
+#endif
     if(cmd.size())
     {
         unsigned char chksum = 0;
@@ -112,15 +127,21 @@ void client_t::send_resp(const msgbuf_t &resp)
         // compute chksum and push to end of resp
         for(int i=0 ; i<cmd.size() ; ++i)
         {
-            //printf("%02x ", cmd[i]);
+#ifdef DEBUG				
+            printf("%02x ", cmd[i]);
+#endif
             chksum += cmd[i];
         }
         cmd.push_back(~chksum + 1);
-        //printf("%02x ", cmd[cmd.size()-1]);
+#ifdef DEBUG				
+        printf("%02x ", cmd[cmd.size()-1]);
+#endif
         write(m_fd, cmd.data(), cmd.size());
         tcdrain(m_fd);    // delay for output
     }
-    //printf("\n");
+#ifdef DEBUG				
+    printf("\n");
+#endif
 }
 
 msgbuf_t client_t::process_cmd(const msgbuf_t& msg)
@@ -650,7 +671,10 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
     resp[1] = msg[1];
     resp[2] = msg[2];
 
-    fcb.hdl = creat(filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    //creat() opens the file with 0_WRONLY which breaks Random File Access!
+    //fcb.hdl = creat(filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    fcb.hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
     printf("create_file(%04x, %d) '%s' ", fcb_addr, fcb.hdl, filename.c_str());
 

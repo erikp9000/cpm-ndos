@@ -5,27 +5,24 @@ program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
-Why not CP/NET?
-
-CP/NET relies on MP/M for the server side, which I wasn't interested in running, 
-and MP/M doesn't support directories like a modern system. I figured, if I was
-going to write an MP/M replacement, why not start fresh? Also, I was intrigued
-by the challenge.
-
+v1.1 is now fully relocatable without rebuilding and supports the CP/M random access read and 
+write functions. Tested with Wordstar.
 
 ## Required Build tools
 
-  - ASM.COM and LOAD.COM (on CP/M client)
+  - RMAC.COM, LINK.COM, MAC.COM and LOAD.COM (on CP/M client)
   - G++ (on server)
 
 ## Architecture
 
-NDOS consists of three major parts: 
+NDOS consists of five major parts: 
 
-  - NDOS.COM – A CP/M 2.2 TSR which 'hooks' the BDOS to process commands 
-    for the network drive 
+  - LDNDOS.COM - Loads and relocates NIOS and NDOS into upper TPA
+  - NIOS.SPR - The network initialization, send, and receive functions
+  - NDOS.SPR – The network OS which hooks the CP/M 2.2 BDOS system calls
+    and processes all calls on the network drive (P:)  
   - CCP.COM – A relocatable version of CP/M 2.2 Command Console Processor
-  - ndos-srv – Program that runs on a Linux computer
+  - ndos-srv – C/C++ Program that runs on a Linux computer
 
 There are also several CP/M utilities:
 
@@ -51,30 +48,60 @@ There are also several CP/M utilities:
   - Directory names longer than 9 characters are truncated by ndos-srv so the 
     full name is not viewable from NDOS though CD can still move into long-
     named directories.
+	
+  - The built-in SAVE command is broken when NDOS is loaded because breaking-out
+    of DDT requires a Warm boot (^C) and this loads CCP.COM into the TPA 
+	overwriting anything that was being patched in DDT. The work-around is to
+	unload NDOS and patch files on a physical drive.
 
-  - The Network I/O System (NIOS) is built into the NDOS and requires
-    customization for the target system serial port.
   
 
-## NDOS.COM
+## LDNDOS.COM
 
-The NDOS.COM TSR installs itself in the 2K bytes just below the BDOS and hooks 
-the BDOS entry vector (addresses 6&7) to preserve itself and also so that all 
-BDOS calls are first routed through the NDOS. The NDOS also hooks the Warm 
-start vector in the BIOS jump table so that NDOS can reload the relocatable 
+LDNDOS.COM loads the page-relocatable files, NDOS.SPR and NIOS.SPR, into the
+upper TPA just below the BDOS and jumps into the NDOS cold entry point. The
+NDOS hooks the BDOS entry vector (addresses 6&7) to preserve itself and also 
+so that all BDOS calls are first routed through the NDOS. The NDOS also hooks 
+the Warm start vector in the BIOS jump table so that NDOS can reload the relocatable 
 CCP.COM from drive A: on a warm start. If CCP.COM is not found, NDOS jumps to 
 the old BIOS Warm start which recovers the CP/M system from the system tracks, 
 removing NDOS from memory.
 
+LDNDOS.COM supports three invocation patterns:
+
+  - LDNDOS  *[Loads NDOS.SPR and NIOS.SPR]*
+  
+  - LDNDOS file.spr *[Loads NDOS.SPR and FILE.SPR]*
+  
+  - LDNDOS /k *[Unloads NDOS and NIOS and warm starts the system]*
+
+## NIOS.SPR
+
+NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customized 
+for the specific hardware on which it's meant to run. See also KP2-NIOS.ASM (should
+support Kaypro II/2/IV/4/10) and ALTRNIOS.ASM (tested on the Altair Clone).
+
+## NDOS.SPR
+
+This is the relocatable core of NDOS. It should not require any changes to
+run on CP/M 2.2 systems.
+
 ### Porting Considerations
 
-  - The NDOS is not relocatable and must be built for the target system memory. 
-    Adjust memSz and biosSz in NDOS.ASM as appropriate for the target system.
+  - Tools required are:
+    - MAC.COM, Digitial Research Macro assembler
+	- RMAC.COM, Digitial Research Relocating Macro assembler
+	- LOAD.COM, HEX to COM converter
+	- LINK.COM, Digitial Research linker
 	
-  - The NDOS is configured to use the second serial port (@12h/13h) of the 
-    88-2SIO Serial Interface Board for the Altair 8800. To support other systems, 
-	the smsg and rmsg functions in NDOS.ASM must be updated.
+  - Copy NIOS.ASM and implement init, smsg and rmsg for specific hardware
 	
+  - The ALTRNIOS.ASM is configured to use the second serial port (@12h/13h) of the 
+    88-2SIO Serial Interface Board for the Altair 8800. 
+	
+  - The KP2-NIOS.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
+    at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
+
   - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
 
 ### BDOS Function Summary
@@ -95,8 +122,8 @@ Thus, all files on the server belong to all user numbers.
 | 17                 | SEARCH FOR FIRST    | If the selected disk in the FCB is the network disk, NDOS calls server and returns response in the DMA buffer. The response is always returned in the DMA buffer as the first directory entry (directory code=0) and the last extent of the file so that S2, EX, and RC can be used to compute the file size. The block allocation vector of the directory entry is initialized based on the number of 1024-byte blocks used for the final directory extent of the file (all blocks are 3). This supports STAT.COM which uses the directory allocation vector to compute the filesize. |
 | 18                 | SEARCH FOR NEXT     | If the directory of the network disk is currently being accessed, then NDOS calls the server and returns the next matching directory entry, else, jumps to BDOS. If the EX byte in the FCB was set to '?' when srchf (17) was called, then NDOS will return all of the directory extents (up to 32 for a maximum of 512KB file size) for the matching file, in reverse order (supports STAT.COM which counts directory extents to compute file size). Since the first response was the last directory extent, the remaining directory extent allocation vectors are always full (all blocks are 3). |
 | 19                 | DELETE FILE         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
-| 20                 | READ SEQUENTIAL     | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the result in the DMA; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the next block. Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
-| 21                 | WRITE SEQUENTIAL    | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the next block.Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
+| 20                 | READ SEQUENTIAL     | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the result in the DMA; else, jumps to BDOS. Upon return, the caller's FCB byte, CR, is updated to point to the *next* block. Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
+| 21                 | WRITE SEQUENTIAL    | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. Upon return, the caller's FCB byte, CR, is updated to point to the *next* block. Random access is supported by the caller setting S2,EX,CR in the FCB accordingly prior to the call. |
 | 22                 | MAKE FILE           | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 23                 | RENAME FILE         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. |
 | 25                 | RETURN CURRENT DISK | If active disk is network disk, NDOS returns it, else jumps to BDOS |
@@ -104,8 +131,8 @@ Thus, all files on the server belong to all user numbers.
 | 27                 | GET ADDR (ALLOC)    | If the active disk is the network disk, NDOS returns the network disk directory allocation vector which reports that the directory is full; else, jumps to BDOS. |
 | 30                 | SET FILE ATTRIBUTES | **Not supported** NDOS panics and warm boots the system. |
 | 31                 | GETADDR(DISKPARMS)  | NDOS returns network disk parameter block if active disk is network disk, else jumps to BDOS; the disk parameter block indicates that there are 512 directory entries on the network disk and a data allocation block size of 1024 bytes (BSH=3, BLM=7). |
-| 33                 | READ RANDOM         | **Not supported** NDOS panics and warm boots the system. |
-| 34                 | WRITE RANDOM        | **Not supported** NDOS panics and warm boots the system. |
+| 33                 | READ RANDOM         | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the result in the DMA; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the *current* block. |
+| 34                 | WRITE RANDOM        | If the selected disk in the FCB is the network disk, NDOS calls the server and returns the status; else, jumps to BDOS. Upon return, the caller's FCB bytes, S2, EX, and CR are updated to point to the *current* block. |
 | 35                 | COMPUTE FILE SIZE   | **Not supported** NDOS panics and warm boots the system. |
 | 36                 | SET RANDOM RECORD   | If the selected disk in the FCB is the network disk, NDOS sets r0,r1,r2 in the FCB to the file offset addresed by S2,EX,CR; else, jumps to BDOS. |
 | 40                 | WRITE RANDOM WITH ZERO FILL | **Not supported** NDOS panics and warm boots the system. |
@@ -141,6 +168,7 @@ server-side of the NDOS Protocol. It supports multiple clients (CP/M machines).
 JSON format.
 
     { 
+      "root": "cpm"],
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
         { "port": "/dev/ttyAMA0", "baud": 9600 },
@@ -148,6 +176,13 @@ JSON format.
       ]
     }
 
+ - root - Sets the root path for all clients
+ - path - Sets the search path for open file so that clients can access programs
+   on the file server which are not present in the current working directory
+ - serial - Sets the list of serial ports that ndos-srv will monitor for client
+   activity
+ - ndos-srv also monitors for connections on TCP port 8234
+ 
 ## NDOS Protocol
 
 The NDOS Protocol is a request/response protocol where all requests are 

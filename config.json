@@ -7,6 +7,6 @@
 	"/microsoft"
   ],
   "serial": [
-    { "port": "/dev/ttyAMA0", "baud": 9600 }
+    { "port": "/dev/ttyAMA0", "baud": 19200 }
   ]
 }

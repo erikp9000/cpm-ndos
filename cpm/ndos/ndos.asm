@@ -2,209 +2,118 @@
 ;;
 ;; NDOS.ASM
 ;; 
-;; Load BDOS entry address from BDOS vector at address 6
-;; Relocate ourself to BDOS vector minus 0800h (2KB)
-;; Jump to the NDOS entry point
+;; To build NDOS.SPR:
+;;   RMAC NDOS $PZ SZ
+;;   LINK NDOS[OS]
+;;
+;; This file assembles to NDOS.SPR which is a page relocatable
+;; file meant to run just below the NIOS.SPR which itself
+;; is meant to run just below the BDOS.
+;;
+;; +-----------------+
+;; | BIOS            |
+;; +-----------------+
+;; | BDOS            |
+;; +-----------------+
+;; | NIOS            |
+;; +-----------------+
+;; | NDOS            |
+;; +-----------------+
+;; | TPA             |
+;; |                 |
+;; +-----------------+
+;; | 0005 JMP NDOS+6 |
+;; +-----------------+
+;; | 0000 JMP BIOS   |
+;; +-----------------+
+;;
+;;
+;; The NDOS loader loads the NIOS.SPR into the pages just below
+;; the BDOS and loads the NDOS.SPR into the pages just below
+;; the NIOS. The NDOS finds the NIOS jump table by assuming
+;; that the very next page following NDOS is NIOS. After the loader
+;; fixes-up all of the relocation bytes, it jumps to the NDOSCOLD
+;; entry (NDOS+9). The NDOS updates the BDOS vector on page 0
+;; to point to the NDOS which protects the NDOS and BIOS from
+;; being overwritten by other transient programs. NDOS also updates
+;; the BIOS jump table to point the warm start to the warm
+;; entry so that NDOS can load the CCP.
 ;;
 ;; NDOS requires a relocatable CCP.COM on drive A.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-memSz	equ 63		; kilobytes [set as appropriate]
-biosSz	equ 7		; pages [set as appropriate]
-bdosSz	equ 0eh		; pages, CPM 2.2 fixed
-ccpSz	equ 8		; pages, CPM 2.2 fixed [but we don't care]
-ndosSz	equ 8		; pages
+	maclib	ndos
 
-biosBas	equ 1024*memSz - 256*biosSz
-bdosBas	equ 1024*memSz - 256*(biosSz + bdosSz)
-ndosBas	equ 1024*memSz - 256*(biosSz + bdosSz + ndosSz)
-
-warmv	equ 0000h
-cdisk	equ 0004h
-bdosv	equ 0005h
-deffcb	equ 005ch
-defdma	equ 0080h
-tpa	equ 0100h
-
-image	equ 0200h	; address in TPA where the NDOS image starts
-offset	equ ndosBas-image
-
-cr	equ 0dh
-lf	equ 0ah
-
-;; Some standard BDOS functions we use
-prnstr	equ 9
-rstdsk	equ 0dh
-openf	equ 0fh
-closef	equ 10h
-readf	equ 14h
-setdma	equ 1ah
-
-;; The NDOS function code extensions to NDOS
-ngetver	equ 40h		; returns NDOS version as major.minor, packed BCD in A
-sendmsg	equ 41h		; sends packet referenced by DE
-recvmsg	equ 42h		; returns recvd packet in DE, A=0(success)/FF(timeout)
-stats	equ 43h		; return HL pointing to NDOS packet counters
-
-;; Altair 2SIO Serial port
-SIOCTRL	equ 12h		; control register (write only)
-  BAUD0	equ 001h	;   0=/1, 1=/16, 2=/64, 3=reset
-  BAUD1	equ 002h	; 
-  PAR	equ 004h	;   parity (even/odd)
-  STOP	equ 008h	;   stop bits (2/1)
-  BITS	equ 010h	;   data bits (7/8)
-  RTS0	equ 020h	;
-  RTS1	equ 040h	;
-  INTE	equ 080h	;
-SIOSTAT	equ 12h		; status register (read only)
-  RDRF	equ 001h	;   receive data available
-  TDRE	equ 002h	;   transmit buffer empty
-  DCD	equ 004h	;   -Data carrier detect
-  CTS	equ 008h	;   -Clear to send
-  FE	equ 010h	;   framing error
-  OVRN	equ 020h	;   receiver overrun
-  PE	equ 040h	;   parity error
-  IRQ	equ 080h	;   interrupt request
-SIODATA	equ 13h		; data register (read/write)
-
-; Receive byte timeout counter
-RECVTMO	equ 32768
-
-NDOSVER equ 10h		; packed binary coded decimal
+NDOSVER equ 11h		; packed binary coded decimal
 NDOSDSK	equ 15		; drive P is the network drive
+RETRYCNT equ 3          ; number of transceive attempts before failure
 
-; NDOS message format:  |LEN|CMD|DATA ...|CHK|
-NFNDFST	equ 02h		; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NFNDNXT	equ 04h		; DATA is |FCBlo|FCBhi|
-NOPENF	equ 06h		; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NCLOSEF	equ 08h		; DATA is |FCBlo|FCBhi|
-NDELETF	equ 0Ah		; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NREADF	equ 0Ch		; DATA is |FCBlo|FCBhi|Reclo|Rechi|
-NWRITEF	equ 0Eh		; DATA is |FCBlo|FCBhi|Reclo|Rechi|Datax128|
-NCREATF	equ 10h		; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NRENAMF	equ 12h		; DATA is |NAMEx8|EXTx3|NAMEx8|EXTx3|
-NCHDIR	equ 20h		; DATA is |Path|
-NMKDIR	equ 22h		; DATA is |Path|
-NRMDIR	equ 24h		; DATA is |Path|
-NECHO	equ 40h		; DATA is |...|
+	; NIOS entry points
+NIOSINIT	equ	0
+NIOSSMSG	equ	3
+NIOSRMSG	equ	6
+NIOSSTAT	equ	9
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; Image relocator
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	org tpa
-
-	; calculate version
-	mvi a,NDOSVER SHR 4
-	adi '0'
-	sta version
-	mvi a,NDOSVER AND 15
-	adi '0'
-	sta version+2
-	mvi c,prnstr
-	lxi d,signon
-	call bdosv
-
-	mvi c,ngetver
-	call bdosv
-	ora a
-	jz install	; BDOS returns 0 when NDOS is not loaded
+FCB?EX		equ	12	; extent (0-31)
+FCB?S2		equ	14	; extent counter (0-15)
+FCB?RC		equ	15	; records used in this extent (0-127)
+FCB?CR		equ	32	; current record in this extent (0-127)
+FCB?R0		equ	33	; low-byte of random record #
+FCB?R1		equ	34	; high-byte of random record #
+FCB?R2		equ	35 	; overflow of R1
 	
-	mvi c,prnstr
-	lxi d,error
-	jmp bdosv	; quit
-		
-install:	
-	lxi h,image	; source NDOS wedge
-	lxi d,ndosBas	; destination
-	lxi b,lastaddr-firstaddr
-relocloop:
-	mov a,m		; get byte at hl
-	stax d		; store to de
-	inx h
-	inx d
-	dcx b
-	mov a,b
-	ora c
-	jnz relocloop
-
-	;
-	; Hook into BDOS jump vector
-	lhld bdosv+1	; get BDOS entry address
-	shld bdosadr+1	; save original BDOS entry locally
-	lxi h,ndosent	; get NDOS entry address
-	shld bdosv+1	; update BDOS vector so we are protected
-
-	;
-	; Hook into BIOS warm start vector
-	lhld warmv+1	; get BIOS warm start
-	inx h		; skip JMP byte
-	mov a,m		; low-byte of warm start function
-	sta warmst+1
-	mvi a,ndoswarm AND 255
-	mov m,a		; update BIOS jump table
-	inx h
-	mov a,m		; high-byte
-	sta warmst+2
-	mvi a,ndoswarm SHR 8
-	mov m,a		; update BIOS jump table
-
-	jmp ndoswarm	; load & execute CCP.COM
-
-signon:	db 'NDOS '
-version: db 'x.y',cr,lf
-	db 'Copyright (c) 2019 Erik Petersen',cr,lf
-	db '$'
-
-error:	db 'Already running',cr,lf
-	db '$'
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Resident Network DOS image starts here
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	org image
-
-firstaddr equ $+offset
-
+firstaddr:
 	; This makes CCP.COM happy
 	db 0,22,0,0,0,0	; serial number 
 
-ndosent	equ $+offset
-	jmp ndosbeg	; standard entry point
-	
-fcb	equ $+offset
-	db 1,'CCP     COM',0,0,0,0
-	db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-	db 0 ; cr
+entry:  jmp begin	; standard entry point
+	jmp cold	; cold start entry - hook vectors & init NIOS
+	jmp warm	; warm start entry - load CCP.COM
 
-noccpmsg equ $+offset
-	db 'CCP.COM not found',cr,lf
-	db '$'
+	; bdosadr and warmst are set by cold from page 0 values
+	; before cold redirects BDOS calls to NDOS and hooks
+	; the BIOS warm start vector in the jump table.
 
-filed	equ $+offset
-	db 'CCP.COM loaded',cr,lf
-	db '$'
+bdosadr:jmp 0		; Original BDOS address
 
-panicmsg equ $+offset
-	db cr,lf,cr,lf,'**** NDOS panic '
-panicarg equ $+offset
-	db 'XX ****',cr,lf
-	db '$'
+warmst:	hlt		; Original BIOS Warm Start - The BIOS
+	dw 0		; reloads the BDOS and original CCP from
+			; the system tracks. Don't call/jmp here
+			; without restoring the BIOS warm start
+			; in the BIOS jump table or the next
+			; warm start will crash the system because
+			; NDOS will be gone.
 
-bdosadr	equ $+offset
-	jmp 0		; jump to BDOS
+restore:jmp remove	; Restore vectors & unload NDOS
 
-warmst	equ $+offset
-	jmp 0		; jump to BIOS Warm Start
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; local variables
+fcb:
+	db	1,'CCP     COM',0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0 ; cr
 
-functbl equ $+offset
+noccpmsg:
+	db	cr,lf,'CCP.COM not found',cr,lf
+	db	'$'
+
+filed:
+	db	cr,lf,'CCP.COM loaded',cr,lf
+	db	'$'
+
+panicmsg:
+	db	cr,lf,cr,lf,'**** NDOS panic '
+panicarg:
+	db	'XX ****',cr,lf
+	db	'$'
+
+functbl:
 	; BDOS function table
 	;        0       1       2       3       4       5       6       7
 	dw  gobdos, gobdos, gobdos, gobdos, gobdos, gobdos, gobdos, gobdos
@@ -218,14 +127,14 @@ functbl equ $+offset
 	dw  gobdos, readrv,writerv, getszv, setrrv, gobdos, gobdos, gobdos
 	;       40
 	dw  wrtrfv
-functblend equ $+offset
+functblend:
 
 nfuncs	equ (functblend-functbl)/2
 
 ;
 ; Fake disk parameter block 
 ;
-dpb	equ $+offset
+dpb:
 	dw 0		; SPT sectors per track
 	db 3		; BSH allocation block shift factor
 	db 7		; BLM allocation block mask
@@ -241,7 +150,7 @@ dpb	equ $+offset
 ; directory. Anyone who looks will conclude that the drive is full but
 ; we don't have to reserve memory for a meaningless allocation vector.
 ;
-alvs	equ $+offset
+alvs:
 	db 0ffh,0ffh
 	; In the eventuality that an app requires drive space to run
 	; the two bytes above plus the following are needed fo DSM = 242.
@@ -249,70 +158,99 @@ alvs	equ $+offset
 	;db 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0
 	;db 0
 
-sbuf	equ $+offset
-	ds 140		; network send buffer
+sbuf:
+	ds 	140		; network send buffer
 
-rbuf	equ $+offset
-	ds 140		; network receive buffer
+rbuf:
+	ds 	140		; network receive buffer
 
-active	equ $+offset
-	db 0		; current default drive
+active:
+	db 	0		; current default drive
 
-params	equ $+offset
-	dw 0		; de input parameter
+params:
+	dw 	0		; de input parameter
 
-dmaaddr	equ $+offset
-	dw 0		; the DMA address
+dmaaddr:
+	dw 	0		; the DMA address
 
-savefcb	equ $+offset
-	dw 0		; FCB address for Search for next
+savefcb:
+	dw 	0		; FCB address for Search for next
 
-fndactive equ $+offset
-	db 0ffh		; flag for Search for next
+fndactive:
+	db 	0ffh		; flag for Search for next
 
-fndextent equ $+offset
-	db 0		; Search file extent flag
+fndextent:
+	db 	0		; Search file extent flag
 
-retry	equ $+offset
-	db 0		; message retry counter
+status:
+	dw	0		; return code
 
-status	equ $+offset
-	dw 0		; return code
+userstk:
+	dw	0		; storage for user stack pointer
 
-userstk	equ $+offset
-	dw 0		; storage for user stack pointer
+niospage:
+	db	0		; page where NIOS starts
 
-; The following block of counters is returned by
-; NDOS call to stats
-sentcnt	equ $+offset
-	dw 0		; count of messages sent
-recvcnt	equ $+offset
-	dw 0		; count of messages received
-tocnt	equ $+offset
-	dw 0		; count of timed-out messages
-chkcnt	equ $+offset
-	dw 0		; count of messages with bad checksum
+biospage:
+	db	0		; page where BIOS starts
 
-	ds 16
-stack	equ $+offset	; NDOS stack
+backupser:
+	db 0,22,0,0,0,0	; backup serial number 
 
+	ds	16
+stack:				; NDOS stack
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; NDOS warm start entry point
+;; NDOS cold start entry point - NDOS/NIOS loader jumps here
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+cold:   lda	niospage	; check if this is first time
+	ora 	a
+	jnz	doinit        	; if we are already loaded, just init NIOS
 
-ndoswarm equ $+offset
+	lxi	h,lastaddr	; get last byte of NDOS
+	mov	a,h             ; a = last page of NDOS
+	inr	a		; a = first page of NIOS
+	sta 	niospage
 
-	lxi sp,stack	; set stack pointer
+	lhld	bdosv+1		; get BDOS entry address
+	shld	bdosadr+1	; save original BDOS entry locally
+
+	lxi	d,warm  	; DE points to our warm start
+	lhld	warmv+1		; get BIOS warm start
+	inx	h		; skip JMP byte in BIOS jump table
+	mov	a,m		; low-byte of warm start function
+	sta	warmst+1
+	mov	m,e		; update BIOS jump table
+	inx	h
+	mov	a,m		; high-byte
+	sta	warmst+2
+	mov	m,d		; update BIOS jump table
+
+	mov	a,h		; BIOS page
+	sta	biospage
+
+doinit: call	init 		; initialize the NIOS
+	; TODO check the return value...
+
+	; fall through to warm start
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; NDOS warm start entry point - the BIOS hook comes here
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+warm:   lxi sp,stack	; set stack pointer
 
 	mvi a,0c3h	; JMP opcode
 	sta warmv
 	sta bdosv
-	lxi h,ndosent	; get NDOS entry address
+	lxi h,entry	; get NDOS entry address
 	shld bdosv+1	; update BDOS vector so we are protected
-	lxi h,biosBas+3
+	lda biospage
+	mov h,a
+	mvi l,3
 	shld warmv+1
 
 	;
@@ -321,14 +259,14 @@ ndoswarm equ $+offset
 	mvi a,76h	; opcode for HLT
 	sta tpa		; store HLT in TPA in case load fails
 	xra a
-	sta fcb+32	; cr=0
 	mvi c,openf
 	lxi d,fcb
+	call resetfcb	; set S2=EX=CR=0
 	call bdosadr
 	inr a
 	jz noccp
 	lxi d,tpa
-loadloop equ $+offset
+loadloop:
 	push d		; store tpa address
 	mvi c,setdma
 	call bdosadr
@@ -343,7 +281,7 @@ loadloop equ $+offset
 	xchg		; swap hl and de
 	jmp loadloop
 
-done	equ $+offset
+done:
 	mvi c,closef
 	lxi d,fcb
 	call bdosadr
@@ -358,29 +296,30 @@ done	equ $+offset
 	lxi sp,tpa	; set stack pointer
 
 	;
-	; Copy six serial number bytes from BDOS
-	; Some programs overwrite the serial number which causes CCP.COM to HALT
-	; when trying to load a transient program
+	; Copy six serial number bytes from backup
+	; Some programs overwrite the serial number (probably stack) 
+        ; which causes CCP.COM to HALT when trying to load a transient program
+        ;
 	mvi c,6
-	lxi h,bdosBas
-	lxi d,ndosBas
-serloop	equ $+offset
-	mov a,m
-	stax d
-	inx h
-	inx d
-	dcr c
-	jnz serloop
+	lxi h,backupser ; backup serial number
+	lxi d,firstaddr	; start of NDOS
+	call copybytes
 
 	jmp tpa		; start CCP
 
-noccp	equ $+offset
-	mvi c,prnstr
+noccp:	mvi c,prnstr
 	lxi d,noccpmsg
 	call bdosadr
-;	hlt
-	; Restore BIOS warmst vector and call it
-	lhld warmv+1	; get BIOS warm start
+        
+        ; fall-through to remove
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; NDOS kill entry point - removes BDOS and BIOS hooks & warm starts
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+remove:	lhld warmv+1	; get BIOS warm start vector
 	inx h		; skip JMP byte
 	lda warmst+1	; get old BIOS warm start
 	mov m,a		; update BIOS jump table
@@ -388,15 +327,14 @@ noccp	equ $+offset
 	lda warmst+2
 	mov m,a		; update BIOS jump table	
 	rst 0		; warm start!
+
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; BDOS/NDOS entry point
+;; BDOS/NDOS entry point - the BDOS hook comes here
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-ndosbeg	equ $+offset
-	xchg		; swap de into hl
+begin:	xchg		; swap de into hl
 	shld params	; save input params
 	xchg		; swap de back
 
@@ -411,14 +349,16 @@ ndosbeg	equ $+offset
 	push h
 
 	mov a,c		; check function code for NDOS functions
-	cpi ngetver
+	cpi n?ver
 	jz retver
-	cpi sendmsg
+	cpi n?smsg
 	jz smsg
-	cpi recvmsg
+	cpi n?rmsg
 	jz rmsg
-	cpi stats
+	cpi n?stats
 	jz retstats
+	cpi n?init
+	jz init
 
 	cpi nfuncs
 	jnc gobdos	; unrecognized function code, goto BDOS
@@ -436,9 +376,9 @@ ndosbeg	equ $+offset
 	pchl		; jump to indexed function
 
 	;
-	; Return status to caller
+	; Return status to caller - NDOS calls return through here
 	;
-return	equ $+offset
+return:
 	lhld userstk	; recover user stack pointer into hl
 	sphl		; set sp from hl
 	lhld status
@@ -450,8 +390,7 @@ return	equ $+offset
 	;
 	; We don't handle the function, send it to BDOS
 	;
-gobdos	equ $+offset
-;	pop h		; pop 'return' from stack
+gobdos:
 	lhld userstk	; recover user stack pointer into hl
 	sphl		; set sp from hl
 	jmp bdosadr
@@ -465,24 +404,33 @@ gobdos	equ $+offset
 	; Outputs:
 	;     a = 10h (1.0)
 	;
-retver	equ $+offset
-	mvi a,NDOSVER
+retver:	mvi a,NDOSVER
 	sta status
 	ret
 
 
 	;
-	; Return pointer to packet stats
+	; Initialize the network
 	;
 	; Inputs:
 	;     None
 	; Outputs:
-	;     hl = pointer
+	;     a = 0(success)/FF(failure)
 	;
-retstats equ $+offset
-	lxi h,sentcnt
-	shld status
-	ret
+init:   mvi	a,NIOSINIT
+
+	; fall-through to gonios
+
+gonios:	lxi	h,savestatus
+	push	h		; push return address
+	mov	l,a
+	lda	niospage
+	mov	h,a
+	pchl			; jump to NIOS function
+
+savestatus:
+	shld	status		; save status
+	ret			; a = 0(success)/FF(failure)
 
 
 	;
@@ -497,49 +445,8 @@ retstats equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(failure)
 	;
-smsg	equ $+offset
-	xchg		; get buffer pointer into hl
-	in SIODATA	; reset RDRF
-	mvi b,0		; init message checksum
-	mov c,m		; message length
-smsg1	equ $+offset
-    	in SIOSTAT
-	ani TDRE
-	jz smsg1	; wait for transmit buffer empty
-
-	mov a,m		; get byte to send
-	out SIODATA	; send it
-	add b		; add it to checksum
-	mov b,a		; store in checksum register
-
-;	nop
-;	nop
-;	nop
-;	nop
-;	nop
-;	nop
-;	nop
-;	nop
-
-	inx h		; advance buffer pointer
-	dcr c		; decrement counter
-	jz smsg2
-	mov a,c
-	cpi 1
-	jnz smsg1	; send next byte
-
-	; when counter hits 1, compute checksum and send it
-	mov a,b		; get checksum
-	cma		; a= not a
-	inr a		; compute 2's complement
-	mov m,a		; write to buffer
-	jmp smsg1	; send it
-
-smsg2	equ $+offset
-	lhld sentcnt
-	inx h
-	shld sentcnt
-	ret		; success
+smsg:	mvi	a,NIOSSMSG
+	jmp	gonios
 
 
 	;
@@ -552,70 +459,21 @@ smsg2	equ $+offset
 	;     buffer will contain message: |LEN|DATA ...|CHK|
 	;          LEN = 2 + count of DATA bytes
 	;
-rmsg	equ $+offset
-	xchg		; get buffer pointer into hl
-	call recvbyte
-	jc rmsgto	; timeout
-
-        mvi b,0         ; init checksum
-	mov c,a         ; first byte is length
-
-nextbyte equ $+offset
-	mov m,a         ; store byte received into buffer
-	inx h           ; advance buffer pointer
-	add b           ; a = a + b
-	mov b,a         ; b = a 
-	dcr c
-	jz recvchk	; check the checksum
-
-	call recvbyte
-	jnc nextbyte
-
-rmsgto	equ $+offset
-	lhld tocnt
-	inx h
-	shld tocnt
-	mvi a,0ffh	; timeout
-	sta status
-	ret
-
-recvchk	equ $+offset
-	ora a		; update proc flags on a register
-	jnz recvbad
-
-	lhld recvcnt	; checksum is valid
-	inx h
-	shld recvcnt
-	ret
-
-recvbad	equ $+offset
-	lhld chkcnt
-	inx h
-	shld chkcnt
-	mvi a,0ffh	; bad checksum
-	sta status
-	ret
+rmsg:	mvi	a,NIOSRMSG
+	jmp	gonios
 
 
-; carry flag is set on timeout
-recvbyte equ $+offset
-	lxi d,RECVTMO
-
-recvwait equ $+offset
-	in SIOSTAT
-	ani RDRF
-	jnz readbyte
-	dcx d
-	mov a,d
-	ora e
-	jnz recvwait
-	stc		; timeout
-	ret
-
-readbyte equ $+offset
-	in SIODATA
-	clc		; received byte in a
-	ret
+	;
+	; Return pointer to packet stats
+	;
+	; Inputs:
+	;     None
+	; Outputs:
+	;     hl = pointer
+	;
+retstats:
+	mvi	a,NIOSSTAT
+	jmp	gonios
 
 
 	;
@@ -626,7 +484,7 @@ readbyte equ $+offset
 	; Outputs:
 	;     None
 	;
-setdmav	equ $+offset
+setdmav:
 	xchg
 	shld dmaaddr
 	xchg
@@ -641,7 +499,7 @@ setdmav	equ $+offset
 	; Outputs:
 	;     None
 	;
-rstdskv	equ $+offset
+rstdskv:
 	lxi h,defdma
 	shld dmaaddr
 	xra a
@@ -657,7 +515,7 @@ rstdskv	equ $+offset
 	; Outputs:
 	;     None
 	;
-seldskv	equ $+offset
+seldskv:
 	mov a,e
 	sta active	; remember the currently active drive
 	cpi NDOSDSK	; is it our disk #?
@@ -673,7 +531,7 @@ seldskv	equ $+offset
 	; Outputs:
 	;     a = default disk
 	;
-getdskv	equ $+offset
+getdskv:
 	lda active
 	cpi NDOSDSK	; is it our disk #?
 	jnz  gobdos	; unknown drive, let bdos handle it
@@ -689,7 +547,7 @@ getdskv	equ $+offset
 	; Outputs:
 	;     hl = address of disk param block for current drive
 	;
-dskprmv	equ $+offset
+dskprmv:
 	lda active
 	cpi NDOSDSK	; is it our disk #?
 	jnz  gobdos	; unknown drive, let bdos handle it
@@ -706,7 +564,7 @@ dskprmv	equ $+offset
 	; Outputs:
 	;     hl = address of allocation vector for current drive
 	;
-allocv	equ $+offset
+allocv:
 	lda active
 	cpi NDOSDSK	; is it our disk #?
 	jnz  gobdos	; unknown drive, let bdos handle it
@@ -716,7 +574,7 @@ allocv	equ $+offset
 
 
 ; internal subroutine to check if FCB at de is selecting the network disk
-isnetdsk equ $+offset
+isnetdsk:
 	ldax d		; get drive select from FCB
 	ora a		; is default drive & current user selected?
 	jz checkactive
@@ -724,9 +582,9 @@ isnetdsk equ $+offset
 	jz checkactive
 	dcr a		; convert 1-16 to 0-15
 	jmp checkdisk
-checkactive equ $+offset
+checkactive:
 	lda active	; get selected disk #
-checkdisk equ $+offset
+checkdisk:
 	cpi NDOSDSK
 	rz		; the network disk is selected, return
 	pop h		; remove return address from stack
@@ -734,13 +592,13 @@ checkdisk equ $+offset
 
 
 ; internal subroutine to copy filename from FCB at de into sbuf+4
-getfilename equ $+offset
+getfilename:
 	lhld params	; hl = FCB address
 	lxi d,sbuf+4	; destination
-getfn1	equ $+offset
+getfn1:
 	mvi c,11	; filename & extension
 	; ignoring bytes dr (byte 0 of FCB) and ex (byte 12)
-getfn2	equ $+offset
+getfn2:
 	inx h
 	mov a,m		; get byte from FCB
 	stax d		; write byte to sbuf
@@ -750,20 +608,16 @@ getfn2	equ $+offset
 	ret
 
 ; internal subroutine to copy filename from rbuf+5 into DMA
-copynamedma equ $+offset
+copynamedma:
 	lhld dmaaddr
 	xchg		; de is destination
 	xra a
 	stax d		; set user code to 0
 	lxi h,rbuf+5	; hl is source
 	mvi c,15	; get filename, extension, ex, s1, s2, & rc
-cpyfn1	equ $+offset
 	inx d
-	mov a,m		; get byte from rbuf
-	stax d		; write to DMA
-	inx h
-	dcr c
-	jnz cpyfn1
+	call copybytes
+
 	; Fill the FCB allocation vector assuming that a block is 1024 bytes
 	; and that we are using 8-bit block numbers (DSM < 256).
 	; This enables STAT.COM to show the file size.
@@ -786,22 +640,22 @@ cpyfn1	equ $+offset
 	mvi a,16
 	sub c		; a = 16 - c
 	mov b,a		; b is # free blocks
-cpyfn2	equ $+offset
+cpyfn2:
 	mov a,c
 	ora a
 	jz cpyfn4
 	mvi a,3		; use a non-zero block #
-cpyfn3	equ $+offset
+cpyfn3:
 	inx d
 	stax d
 	dcr c
 	jnz cpyfn3
-cpyfn4	equ $+offset
+cpyfn4:
 	mov a,b		; check # free blocks
 	ora a
 	rz
 	xra a		; a=0, free block #
-cpyfn5	equ $+offset
+cpyfn5:
 	inx d
 	stax d
 	dcr b
@@ -809,100 +663,146 @@ cpyfn5	equ $+offset
 	ret
 
 ; internal subroutine to convert register a (0 thru F) to hexadecimal char
-getHexChar equ $+offset
+getHexChar:
 	ani 15
 	cpi 10
 	jc less
 	adi 'A'-'0'-10
-less	equ $+offset
+less:
 	adi '0'
 	ret
 
-; send sbuf and get response into rbuf (TODO add retry)
-xcv	equ $+offset
-	mvi c,3
-xcv2	equ $+offset
-	push b
+; send sbuf and get response into rbuf - if there is an error on receive,
+; the request is retried.
+; This only works because all requests are idempotent, even read & write
+; because they include the seek offset in the request.
+xcv:
+	mvi c,RETRYCNT  ; C= # of retries
+xcv2:
+        push b          ; save retry counter
 	lxi d,sbuf
-	call smsg
+	call smsg	; updates status, a = 0(success)/FF(timeout)
 	lxi d,rbuf
-	call rmsg	; a = 0(success)/FF(timeout)
-	pop b
+	call rmsg	; updates status, a = 0(success)/FF(timeout)
+	pop b           ; restore retry counter
 	ora a
 	rz		; success
-	dcr c
+	dcr c           ; decrement retry counter
 	jnz xcv2
-	ret		; timeout
+	ret		; timeout or checksum error
 
 ; reset record offset params in user's FCB, de = FCB address
-resetfcb equ $+offset
-	lxi h,12	; EX
+resetfcb:
+	xra a
+	lxi h,FCB?EX
 	dad d
-	mvi m,0
-	lxi h,14	; S2
+	mov m,a
+	lxi h,FCB?S2
 	dad d
-	mvi m,0
-	lxi h,32	; CR
+	mov m,a
+	lxi h,FCB?CR
 	dad d
-	mvi m,0
+	mov m,a
 	ret
 
 ; advance record offset params in user's FCB, de = FCB address
-advfcb	equ $+offset
+advfcb:
 	lhld params
 	xchg
-	lxi h,32	; CR
+	lxi h,FCB?CR
 	dad d
-	inr m
-	rp		; return if < 128
-	mvi m,0
-	lxi h,12	; EX
-	dad d
-	inr m
-	mov a,m
-	ani 20h
-	rz		; return if < 32
-	mvi m,0
-	lxi h,14	; S2
-	dad d
-	inr m
+	inr m		; most-sig bit selects next extent on read/write
 	ret	
 
 ; get FCB record count, compute and return file offset in bc
-getoffset equ $+offset
+getoffset:
 	lhld params
 	xchg		; de = FCB
-	lxi h,32	; CR
-	dad d
+	lxi h,FCB?CR
+	dad d		; hl points to CR
 	mov a,m
-	ani 7fh
-	mov c,a
-	lxi h,12	; EX
+	mov c,a		; c = current record
+	ora a
+	jp getoff1      ; check for overflow of CR
+	;
+	; on overflow of CR, select next extent
+	mvi m,0		
+	mvi c,0		; c = record 0 of new extent
+	lxi h,FCB?EX
 	dad d
+        inr m		; select next EX
+	mov a,m
+	ani 20h		; check for overflow
+	jz getoff1
+	mvi m,0		; clear overflow of EX
+	lxi h,FCB?S2
+	dad d
+	inr m		; increment S2
+
+        ; c = current record modulus 128, now combine S2 and EX into b and move LSB of EX into c
+getoff1:
+	lxi h,FCB?EX
+	dad d		; hl points to EX
 	mov a,m
 	ani 1fh
-	rar		; lsb in carry
-	mov b,a
+	clc
+	rar		; lsb of EX in carry
+	mov b,a		; b is now most sig. 4-bits of EX
 	jnc getoff2
 	mov a,c
-	ori 80h
+	ori 80h		; c = ((EX & 1)<<7) | (CR & 7Fh)
 	mov c,a
-getoff2	equ $+offset
-	lxi h,14	; S2
-	dad d
+getoff2:
+	lxi h,FCB?S2
+	dad d		; hl points to S2
 	mov a,m
 	rlc
 	rlc
 	rlc
 	rlc
-	ani 0f0h
+	ani 0f0h	; a = S2 << 4
 	ora b
-	mov b,a
+	mov b,a		; b = (S2 << 4) | (EX >> 1)
 	ret	
+
+; return bc = random record counter from FCB
+; update FCB S2, EX, and CR
+getroffset:
+	lhld	params
+	xchg			; de = FCB
+	lxi	h,FCB?R0
+	dad	d		; hl points to R0
+	mov	c,m		; c = R0
+	inx	h
+	mov	b,m		; b = R1
+	; TODO R2 is overflow from R1, we should return an error if R2 is non-zero...
+	lxi	h,FCB?CR
+	dad	d		; hl points to CR
+	mov	a,c
+	ani	07Fh
+	mov	m,a		; save CR
+	lxi	h,FCB?EX
+	dad	d		; hl points to EX
+	mov	a,c
+	ral			; carry is most-sig bit of CR
+	mov	a,b
+	ral			; shift carry into EX
+	ani	1Fh
+	mov	m,a		; save EX
+	lxi	h,FCB?S2
+	dad	d		; hl points to S2
+	mov	a,b
+	rar
+	rar
+	rar
+	rar
+	ani	0Fh
+	mov	m,a		; save S2
+	ret
 
 ; setup network send buffer
 ;   call with b=length, c=network command byte, de=FCB address
-setupbuf equ $+offset
+setupbuf:
 	mov a,b		; network packet length
 	sta sbuf
 	mov a,c		; network command
@@ -914,7 +814,7 @@ setupbuf equ $+offset
 	ret
 
 ; copy # of bytes in c from hl to de
-copybytes equ $+offset
+copybytes:
 	mov a,m		; read byte at hl
 	stax d		; write to de
 	inx h
@@ -933,7 +833,7 @@ copybytes equ $+offset
 	;     a = 0(success)/FF(failure)
 	;     writes the returned directory entry to dmaaddr
 	;
-srchfv	equ $+offset
+srchfv:
 	mvi a,0ffh
 	sta fndactive	; reset Search for next signal
 	call isnetdsk	; doesn't return if not network disk
@@ -953,12 +853,12 @@ srchfv	equ $+offset
 	mov a,m
 	sta fndextent	; save extent filter for Search for next
 
-srchret	equ $+offset
+srchret:
 	call xcv
 	ora a
 	rnz		; xcv sets status
 
-srchrt2	equ $+offset
+srchrt2:
 	call copynamedma ; copy matching filename to DMA address
 
 	lda rbuf+4	; status, 0=success, 0xFF=end of directory
@@ -976,7 +876,7 @@ srchrt2	equ $+offset
 	;     a = 0(success)/FF(failure)
 	;     writes the returned directory entry to dmaaddr
 	;
-srchnv	equ $+offset
+srchnv:
 	lda fndactive
 	ora a
 	jnz  gobdos	; find disk is not network disk
@@ -1002,7 +902,7 @@ srchnv	equ $+offset
 	mvi m,80h	; this extent will be full
 	jmp srchrt2
 
-srchn1	equ $+offset
+srchn1:
 
 	mvi b,5		; message length
 	mvi c,NFNDNXT	; network command
@@ -1021,7 +921,7 @@ srchn1	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(failure)
 	;
-openfv	equ $+offset
+openfv:
 	call isnetdsk	; doesn't return if not network disk
 
 	call resetfcb
@@ -1030,12 +930,12 @@ openfv	equ $+offset
 	mvi c,NOPENF	; network command
 	; de contains FCB address (which we use as a file handle)
 
-xcvwithfn equ $+offset
+xcvwithfn:
 	call setupbuf	; setup sbuf header
 
 	call getfilename ; copy filename from FCB
 
-xcvnofn equ $+offset
+xcvnofn:
 	call xcv	; send sbuf, get response in rbuf
 	ora a
 	rnz		; xcv sets status
@@ -1052,7 +952,7 @@ xcvnofn equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-deletfv	equ $+offset
+deletfv:
 	call isnetdsk	; doesn't return if not network disk
 
 	mvi b,10h	; message length
@@ -1069,7 +969,7 @@ deletfv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-creatfv	equ $+offset
+creatfv:
 	call isnetdsk	; doesn't return if not network disk
 
 	call resetfcb
@@ -1088,7 +988,7 @@ creatfv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(failure)
 	;
-closefv	equ $+offset
+closefv:
 	call isnetdsk	; doesn't return if not network disk
 
 	mvi b,5		; message length
@@ -1108,40 +1008,45 @@ closefv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/1(end of file)/FF(failure)
 	;
-readfv	equ $+offset
-	call isnetdsk	; doesn't return if not network disk
+readfv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getoffset	; bc = file offset from FCB S2,EX,CR
+	call	netread
+	rnz			; error
+	jmp	advfcb		; auto-advance the FCB record counters
 
-	mvi b,7		; message length
-	mvi c,NREADF	; network command
+	; send network file read, bc=file offset
+netread:
+	push	b
+	mvi	b,7		; message length
+	mvi	c,NREADF	; network command
 	; de contains FCB address (which we use as a file handle)
 
-	call setupbuf	; setup sbuf header
+	call	setupbuf	; setup sbuf header
 
-	call getoffset	; get file offset in bc
-	mov a,c
-	sta sbuf+4
-	mov a,b
-	sta sbuf+5
+	pop	b		; get file offset in bc
+	mov	a,c
+	sta	sbuf+4
+	mov	a,b
+	sta	sbuf+5
 
-	call xcv	; transmit sbuf & get response in rbuf
-	ora a
-	rnz		; xcv sets status
+	call	xcv		; transmit sbuf & get response in rbuf
+	ora	a
+	rnz			; xcv sets status
 
-	lda rbuf+4	; status from server
-	ora a
-	sta status
-	rnz		;jnz return	; return error code
+	lda	rbuf+4		; status from server
+	sta	status
+	ora	a		; set/clear Z flag
+ 	rnz			; return error code
 
 	; copy 128 bytes starting at rbuf+5 to DMA address
-	mvi c,128	; # bytes to copy
-	lxi d,rbuf+5	; source
-	lhld dmaaddr	; destination
-	xchg		; de=destination, hl=source
-	call copybytes	; copy c bytes from de to hl
-
-	call advfcb	; increment record offset in FCB
+	mvi	c,128		; # bytes to copy
+	lxi	d,rbuf+5	; source
+	lhld	dmaaddr		; destination
+	xchg			; de=destination, hl=source
+	call	copybytes	; copy c bytes from de to hl
+	xra	a
 	ret
-
 
 	;
 	; Write file
@@ -1151,66 +1056,42 @@ readfv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-writefv	equ $+offset
-	call isnetdsk	; doesn't return if not network disk
+writefv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getoffset	; bc = file offset from FCB S2,EX,CR
+	call	netwrite	; returns a = status
+	rnz			; error
+	jmp	advfcb		; auto-advance FCB to next record 
 
-	mvi a,3
-	sta retry	; init retry counter
-
-writef1	equ $+offset
-	mvi b,135	; message length
-	mvi c,NWRITEF	; network command
+netwrite:
+	push	b		; save file offset
+	mvi	b,135		; message length
+	mvi	c,NWRITEF	; network command
 	; de contains FCB address (which we use as a file handle)
 	
-	call setupbuf	; setup sbuf header
+	call	setupbuf	; setup sbuf header
 	
-	call getoffset	; get file offset in bc
-	mov a,c
-	sta sbuf+4
-	mov a,b
-	sta sbuf+5
+	pop	b		; get file offset in bc
+	mov	a,c
+	sta	sbuf+4
+	mov	a,b
+	sta	sbuf+5
 
 	; copy 128 bytes starting at DMA address to sbuf+6
-	mvi c,128	; # bytes to copy
-	lhld dmaaddr	; source
-	lxi d,sbuf+6	; destination
-	call copybytes
+	mvi	c,128		; # bytes to copy
+	lhld	dmaaddr		; source
+	lxi	d,sbuf+6	; destination
+	call	copybytes
 
-	call xcv	; send sbuf, get response in rbuf
+	call	xcv		; send sbuf, get response in rbuf
 
-	ora a		; a=0(success)/FF(timeout)
-	;jnz writef2
-	rnz		; error
-	lda rbuf+4	; status from server
-	ora a
-	sta status
-	rnz		; error
-
-	call advfcb	; advance current record counter in FCB
+	ora	a		; a=0(success)/FF(timeout)
+	rnz			; error
+	lda	rbuf+4		; status from server
+	sta	status
+	ora	a		; set/clear Z flag
 	ret
 
-	; TODO move retries to xcv
-
-;writef2	equ $+offset
-;	lda retry
-;	dcr a
-;	jz c1
-;	sta retry
-;	lxi h,0
-;
-;writef3	equ $+offset
-;	inx h
-;	mov a,h
-;	ora l
-;	jnz writef3	; wait for a while
-;	lhld params
-;	xchg		; de = FCB address
-;	jmp writef1	; send the request again
-;
-;c1	equ $+offset
-;	mvi a,0ffh
-;	sta status
-;	ret
 
 
 	;
@@ -1221,7 +1102,7 @@ writef1	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-renamfv	equ $+offset
+renamfv:
 	call isnetdsk	; doesn't return if not network disk
 
 	mvi b,27	; message length
@@ -1249,14 +1130,14 @@ renamfv	equ $+offset
 	; Outputs:
 	;     random record fields in FCB
 	;
-setrrv	equ $+offset
+setrrv:
 	call isnetdsk	; doesn't return if not network disk
 
 	; Read S2(14), EX(12), and CR(32) from FCB
 	call getoffset	; get file offset in bc
 
 	; Store bc in r0(33),r1(34),r2(35) in FCB
-	lxi h,33	; offset to r0
+	lxi h,FCB?R0	; offset to r0
 	dad d
 	mov m,c		; low-byte
 	inx h
@@ -1274,7 +1155,8 @@ setrrv	equ $+offset
 	; Outputs:
 	;     random record fields in FCB
 	;
-getszv	equ $+offset
+getszv:
+	jmp	panic
 
 
 	;
@@ -1285,7 +1167,8 @@ getszv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-setatrv	equ $+offset
+setatrv:
+	jmp	panic
 
 
 
@@ -1297,7 +1180,10 @@ setatrv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-readrv	equ $+offset
+readrv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getroffset	; bc = file offset from FCB R0,R1,R2
+	jmp	netread
 
 
 	;
@@ -1308,7 +1194,10 @@ readrv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-writerv	equ $+offset
+writerv:
+	call	isnetdsk	; doesn't return if not network disk
+	call	getroffset	; bc = file offset from FCB R0,R1,R2
+	jmp	netwrite
 
 
 	;
@@ -1319,11 +1208,12 @@ writerv	equ $+offset
 	; Outputs:
 	;     a = 0(success)/FF(error)
 	;
-wrtrfv	equ $+offset
+wrtrfv:
+	jmp	panic
 
 
 	; Panic exit
-	call isnetdsk	; doesn't return if not network disk
+panic:	call isnetdsk	; doesn't return if not network disk
 
 	mov a,c		; convert function code to hexadecimal
 	rrc
@@ -1341,11 +1231,9 @@ wrtrfv	equ $+offset
 
 	; We are aborting the program because it's trying to do
 	; something we don't support.
-	jmp warmv	; jump to BIOS warm start
+	jmp warm	; reload CCP.COM
 
+lastaddr:
 
-
-lastaddr equ $+offset
-	
 	end
 
