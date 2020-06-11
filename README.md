@@ -48,6 +48,11 @@ There are also several CP/M utilities:
   - Directory names longer than 9 characters are truncated by ndos-srv so the 
     full name is not viewable from NDOS though CD can still move into long-
     named directories.
+	
+  - The built-in SAVE command is broken when NDOS is loaded because breaking-out
+    of DDT requires a Warm boot (^C) and this loads CCP.COM into the TPA 
+	overwriting anything that was being patched in DDT. The work-around is to
+	unload NDOS and patch files on a physical drive.
 
   
 
