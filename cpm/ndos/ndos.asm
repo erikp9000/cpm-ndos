@@ -594,18 +594,13 @@ checkdisk:
 ; internal subroutine to copy filename from FCB at de into sbuf+4
 getfilename:
 	lhld params	; hl = FCB address
+getfnsrchnv:
 	lxi d,sbuf+4	; destination
 getfn1:
 	mvi c,11	; filename & extension
 	; ignoring bytes dr (byte 0 of FCB) and ex (byte 12)
-getfn2:
-	inx h
-	mov a,m		; get byte from FCB
-	stax d		; write byte to sbuf
-	inx d
-	dcr c
-	jnz getfn2
-	ret
+	inx h           ; skip over drive byte
+        jmp copybytes
 
 ; internal subroutine to copy filename from rbuf+5 into DMA
 copynamedma:
@@ -904,11 +899,17 @@ srchnv:
 
 srchn1:
 
-	mvi b,5		; message length
+	mvi b,10h	; message length
 	mvi c,NFNDNXT	; network command
 	; de already contains FCB address (which we use as a file handle)
 	
 	call setupbuf
+
+        ; This allows the caller to change the search filter between Seach for first
+        ; and Search for next. This is a little quirk of CP/M which lets programs
+        ; specify from where in the directory the Search for next will begin.
+        xchg             ; hl = FCB
+	call getfnsrchnv ; copy filename from FCB
 
 	jmp srchret
 

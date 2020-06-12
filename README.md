@@ -228,8 +228,8 @@ Request:
 | ----| ----- | -------- |
 | 02h | FCBlo | Low-byte of FCB address on client |
 |     | FCBhi | High-byte of FCB address on client |
-|     | NAMEx8| File name with optional wildcard character '?' |
-|     | EXTx3 | File extension with optional wildcard character '?' | 
+|     | NAMEx8| File name, supports wildcard character '?' |
+|     | EXTx3 | File extension, supports wildcard character '?' | 
 
 Response:
 
@@ -268,7 +268,14 @@ second EXT byte) is not supported.
 
 #### Find Next
 
-Find the next file matching the search parameters specified in Find First.
+Find the next file matching the search parameters specified in NAMEx8 and EXTx3.
+The search parameters must be specified again because some programs use a quirk
+of CP/M in which they call Find First to prime CP/M to point to a specific
+directory entry and then update the FCB so that the Find Next call to CP/M
+will return the next file matching the newly changed Find Next search parameters.
+
+If NAMEx8 and EXTx3 are not provided, Find Next will use the filter previously
+set by Find First.
 
 Request:
 
@@ -276,6 +283,8 @@ Request:
 | ----| ----- | -------- |
 | 04h | FCBlo | Low-byte of FCB address on client |
 |     | FCBhi | High-byte of FCB address on client |
+|     | NAMEx8| Optional File name, supports wildcard character '?' |
+|     | EXTx3 | Optional File extension, supports wildcard character '?' | 
 
 Response:
 

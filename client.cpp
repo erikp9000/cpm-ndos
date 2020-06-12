@@ -12,6 +12,8 @@
 
 #undef DEBUG
 
+const int MAX_FILENAME_LEN = 11;
+
 // This function manages the receive buffer for a client.
 // Here a request is assembled and if the checksum is valid,
 // then the command is processed and a response is sent.
@@ -234,10 +236,10 @@ static char* GetShortFilename(char* name)
 {
     int i,j;
 
-    memset(out, ' ', 11);
-    out[11] = 0;
+    memset(out, ' ', MAX_FILENAME_LEN);
+    out[MAX_FILENAME_LEN] = 0;
 
-    for(i=0, j=0 ; (j<11) && (name[i]) ; ++i,++j)
+    for(i=0, j=0 ; (j<MAX_FILENAME_LEN) && (name[i]) ; ++i,++j)
     {
         if(name[i] == '.')
             j = 7;
@@ -297,19 +299,12 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
     int fcb_addr = get_fcb_addr(msg);
     fcb_t& fcb = m_fcbs[fcb_addr];
 
-    //printf("find_first(%04x)\n", fcb_addr);
+    printf("find_first(%04x)\n", fcb_addr);
 
     reset_fcb(fcb);
 
     printf("find_first(%04x): open dir '%s'\n", fcb_addr, m_cwd.c_str());
     fcb.d = opendir(m_cwd.c_str());
-
-    // extract the filter
-    fcb.filter.clear();
-    fcb.filter.resize(11);
-    for(size_t i=0 ; i < 11 ; ++i)
-        fcb.filter[i] = msg[3+i] & 0x7f;
-    printf("filter: '%s'\n", fcb.filter.c_str());
 
     return find_next(msg);
 }
@@ -318,6 +313,9 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
 // Inputs:
 //   1-byte command
 //   2-byte FCB address
+//   8-byte filename
+//   3-byte extension
+//     '?' matches any character in filename/extension
 // Outputs:
 //   See find_first()
 //
@@ -328,7 +326,18 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
     int fcb_addr = get_fcb_addr(msg);
     fcb_t& fcb = m_fcbs[fcb_addr];
 
-    //printf("find_next(%04x)\n", fcb_addr);
+    // extract the filter - backwards compatibility with NDOS 1.0 & early 1.1
+	if(msg.size() > 3)
+	{
+		fcb.filter.clear();
+		fcb.filter.resize(MAX_FILENAME_LEN);
+		for(size_t i=0 ; i < MAX_FILENAME_LEN ; ++i)
+			fcb.filter[i] = msg[3+i] & 0x7f;
+	}
+	
+#ifdef DEBUG
+    printf("find_next(%04x) filter:'%s'\n", fcb_addr, fcb.filter.c_str());
+#endif
 
     // copy FCB to response
     resp[0] = msg[0] + 1;
@@ -369,9 +378,9 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
             if(name.length() > 9) name.resize(9);
             name.insert((size_t)0,(size_t)1,'<');
             name.insert(name.length(),(size_t)1,'>');
-            if(name.length() < 11)
+            if(name.length() < MAX_FILENAME_LEN)
             {
-                for(int i = 11 - name.length() ; i ; --i)
+                for(int i = MAX_FILENAME_LEN - name.length() ; i ; --i)
                     name += " ";
             }
         }
@@ -388,7 +397,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 		//printf("find_next: short filename='%s'\n", name.c_str());
 
         bool bMatch = true;
-        for(int i=0 ; i<11 ; ++i) 
+        for(int i=0 ; i<MAX_FILENAME_LEN ; ++i) 
         {
             if((name[i] != fcb.filter[i]) &&
                (fcb.filter[i] != '?'))
@@ -413,7 +422,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
             resp[3] = 0; // success
 
             // copy short filename into response
-            for(int i=0 ; i<11 ; ++i)
+            for(int i=0 ; i<MAX_FILENAME_LEN ; ++i)
                 resp[file_off+i] = name[i];
 
             // get filesize
@@ -664,7 +673,7 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 
     reset_fcb(fcb);
 
-    string filename = cpm2linux((const char*)&msg[3], 11);
+    string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
     
     msgbuf_t resp(4);
     resp[0] = msg[0] + 1;
@@ -754,7 +763,7 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
     msgbuf_t resp = find_first(msg);
 
     string oldfn = fcb.local_filename;
-    string newfn = cpm2linux((const char*)&msg[14], 11);
+    string newfn = cpm2linux((const char*)&msg[14], MAX_FILENAME_LEN);
 
     printf("rename_file(%04x) '%s'-> '%s' ", fcb_addr,
         oldfn.c_str(), newfn.c_str());
