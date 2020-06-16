@@ -1,10 +1,12 @@
 {
-  "root": "cpm", 
+  "root": "cpm",
+ 
   "path": [
     "/ndos",
     "/bin",
 	"/dri",
-	"/microsoft"
+	"/microsoft",
+	"/bdsc/bdsc160"
   ],
   "serial": [
     { "port": "/dev/ttyAMA0", "baud": 19200 }

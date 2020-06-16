@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <time.h>
 
 #include <vector>
 #include <string>
@@ -42,6 +43,7 @@ typedef struct fcb {
     std::string filter;
     std::string local_filename;
     int hdl;
+	time_t last_access;
 } fcb_t;
 
 typedef std::map<uint16_t,fcb_t> fcb_map_t;
@@ -90,7 +92,7 @@ protected:
 
 private:
     void reset_fcb(fcb_t & fcb);
-    int get_fcb_addr(const msgbuf_t& msg);
+    int get_file_handle(const msgbuf_t& msg);
 
 private:
     string m_cwd;  // current working directory

@@ -5,8 +5,20 @@ program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
-v1.1 is now fully relocatable without rebuilding and supports the CP/M random access read and 
+v1.2 Dispenses with the FCB address as a file reference. On file open and file create, 
+the server sends its file handle to the client which stores it in the FCB disk allocation 
+vector array and includes it with subsequent calls to read file, write file, and close
+file. This was a necessary change to support the BD Software C Compiler (BDSC) which re-uses
+the same FCB (005Ch) to access multiple files.
+
+v1.1a Extended Find Next to support the client changing the ambiguous file name after the
+call to Find First. The program, CRCK44.COM, relied on this side-effect behavior of CP/M 2.2
+to CRC multiple files specified by an ambiguous filename on the command line.
+
+v1.1 Now fully relocatable without rebuilding and supports the CP/M random access read and 
 write functions. Tested with Wordstar.
+
+v1.0 First version.
 
 ## Required Build tools
 
@@ -216,18 +228,17 @@ its receive buffer.
 
 ### NDOS Commands
 
+
 #### Find First
 
-Find the first file matching the NAMEx8 and EXTx3 parameters. The FCBhi,FCBlo values 
-are the actual address of the File Control Block on the client. The server uses this
-value to correlate the open files/directory on the server with the FCB in the client.
+Find the first file matching the NAMEx8 and EXTx3 parameters.
 
 Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 02h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 02h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | NAMEx8| File name, supports wildcard character '?' |
 |     | EXTx3 | File extension, supports wildcard character '?' | 
 
@@ -235,8 +246,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 03h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 03h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | STAT  | 0=success, 0xFF=end of directory |
 |     | NAMEx8| File name - not present if STAT=0xFF |
 |     | EXTx3 | File extension - not present if STAT=0xFF | 
@@ -281,8 +292,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 04h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 04h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | NAMEx8| Optional File name, supports wildcard character '?' |
 |     | EXTx3 | Optional File extension, supports wildcard character '?' | 
 
@@ -290,7 +301,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 05h | ... | Same as Find First |
+| 05h | ...   | Same as Find First |
+
 
 #### Open File
 
@@ -302,8 +314,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 06h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 06h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | NAMEx8| File name with optional wildcard character '?' |
 |     | EXTx3 | File extension with optional wildcard character '?' | 
 
@@ -311,29 +323,30 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 07h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 07h | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | STAT  | 0=success, 0xFF=not found |
 
 
 #### Close File
 
-Close the file referenced by FBChi,FCBlo. 
+Close the file referenced by fd. 
 
 Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 08h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 08h | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 
 Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 09h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 09h | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | STAT  | 0=success, 0xFF=not found |
+
 
 #### Delete File
 
@@ -343,8 +356,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0ah | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0ah | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -352,8 +365,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0bh | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0bh | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | STAT  | 0=success, 0xFF=not found/access denied/etc. |
 
 
@@ -370,8 +383,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0ch | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0ch | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | Reclo | Optional record number to seek to before reading, low-byte |
 |     | Rechi | Optional record number to seek to before reading, high-byte | 
 
@@ -379,10 +392,11 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0dh | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0dh | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | STAT  | 0=success, 1=end of file, 0xFF=failure |
 |     | Datax128 | Optional read data - only returned on success |
+
 
 #### Write File
 
@@ -394,8 +408,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0eh | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0eh | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | Reclo | Optional record number to seek to before writing, low-byte |
 |     | Rechi | Optional record number to seek to before writing, high-byte | 
 |     | Datax128 | Write data |
@@ -404,8 +418,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0fh | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 0fh | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | STAT  | 0=success, 5=disk full (access denied), 0xFF=failure |
 
 
@@ -417,8 +431,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 10h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 10h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -426,8 +440,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 11h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 11h | fd    | File handle |
+|     | -fd   | Two's complement file handle |
 |     | STAT  | 0=success, 0xFF=failure |
 
 
@@ -439,8 +453,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 12h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 12h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | oldNAMEx8| Old File name |
 |     | oldEXTx3 | Old File extension | 
 |     | newNAMEx8| New File name |
@@ -450,8 +464,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 13h | FCBlo | Low-byte of FCB address on client |
-|     | FCBhi | High-byte of FCB address on client |
+| 13h | Byte  | Ignored  |
+|     | Byte  | Ignored  |
 |     | STAT  | 0=success, 0xFF=failure |
 
 

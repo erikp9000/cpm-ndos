@@ -13,6 +13,7 @@
 #undef DEBUG
 
 const int MAX_FILENAME_LEN = 11;
+const time_t FILE_TIMEOUT = 5*60;
 
 // This function manages the receive buffer for a client.
 // Here a request is assembled and if the checksum is valid,
@@ -214,20 +215,15 @@ void client_t::reset_fcb(fcb_t& fcb)
         closedir(fcb.d);
         fcb.d = NULL;
     }
-
-    if(-1 != fcb.hdl)
-    {
-        printf("close hdl=%d\n", fcb.hdl);
-        close(fcb.hdl);
-        fcb.hdl = -1;
-    }
 }
 
 
-int client_t::get_fcb_addr(const msgbuf_t& msg)
+int client_t::get_file_handle(const msgbuf_t& msg)
 {
-    int fcb_addr = (msg[2] << 8) | msg[1];
-    return fcb_addr;
+	if(0 == ((msg[1] + msg[2]) & 255))
+		return msg[1];
+	else
+		return -1; // bad file handle
 }
 
 // TODO handle long filenames by hashing name to a CRC
@@ -274,13 +270,13 @@ static string cpm2linux(const char* str, size_t len)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignored
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte copied from request
 //   1-byte status (0=success, 0xFF=failure)
 //   8-byte filename
 //   3-byte extension (R/O=msb t1, SYS=msb t2)
@@ -291,28 +287,44 @@ static string cpm2linux(const char* str, size_t len)
 //
 //   Or at end of directory
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte copied from request
 //   1-byte 0xFF
 //
 msgbuf_t client_t::find_first(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[0];
 
-    printf("find_first(%04x)\n", fcb_addr);
+    printf("find_first(%d)\n", fcb.hdl);
 
     reset_fcb(fcb);
 
-    printf("find_first(%04x): open dir '%s'\n", fcb_addr, m_cwd.c_str());
+    printf("find_first(%d): open dir '%s'\n", fcb.hdl, m_cwd.c_str());
     fcb.d = opendir(m_cwd.c_str());
 
+	// TODO Improve on this...
+	// CP/M isn't good about closing files that were only read.
+	// So if a file handle was opened 'a long time ago' and not 
+	// recently accessed, we will close it here.
+	for(fcb_map_t::iterator it = m_fcbs.begin() ; it != m_fcbs.end() ; ++it)
+	{
+		if((it->second.hdl > 0) && (time(NULL) - it->second.last_access > FILE_TIMEOUT))
+		{
+			printf("Timeout, closing file (%d) '%s'\n", 
+				it->second.hdl, 
+				it->second.local_filename.c_str());
+		
+			close(it->second.hdl);
+			m_fcbs.erase(it->second.hdl);
+		}
+	}
+	
     return find_next(msg);
 }
 
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignored
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
@@ -323,8 +335,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 {
     msgbuf_t resp(4); // end of directory response
 
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[0];
 
     // extract the filter - backwards compatibility with NDOS 1.0 & early 1.1
 	if(msg.size() > 3)
@@ -336,10 +347,10 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 	}
 	
 #ifdef DEBUG
-    printf("find_next(%04x) filter:'%s'\n", fcb_addr, fcb.filter.c_str());
+    printf("find_next(%d) filter:'%s'\n", fcb.hdl, fcb.filter.c_str());
 #endif
 
-    // copy FCB to response
+    // copy 'ignored' to response
     resp[0] = msg[0] + 1;
     resp[1] = msg[1];
     resp[2] = msg[2];
@@ -349,7 +360,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
     {
         fcb.de = readdir(fcb.d);
 
-	if(!fcb.de) break;
+		if(!fcb.de) break;
 
         fcb.local_filename = fcb.de->d_name;
 
@@ -394,7 +405,9 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
             continue; // check next entry
         }
 
-		//printf("find_next: short filename='%s'\n", name.c_str());
+#ifdef DEBUG
+		printf("find_next: short filename='%s'\n", name.c_str());
+#endif
 
         bool bMatch = true;
         for(int i=0 ; i<MAX_FILENAME_LEN ; ++i) 
@@ -409,7 +422,9 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 
         if(bMatch) 
         {
-			//printf("find_next: Match!\n");
+#ifdef DEBUG
+			printf("find_next: Match!\n");
+#endif
             const size_t file_off = 4;
             const size_t ext_off = 12;
             const size_t ex = 15;
@@ -459,19 +474,23 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignored
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte fd and -fd
 //   1-byte status (0=success, 0xFF=failure)
 //
 msgbuf_t client_t::open_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[0];
+	int hdl = -1;
+
+	string remote;
+	remote.assign((char*)&msg[3], 0, MAX_FILENAME_LEN);
+    printf("open_file '%s'\n", remote.c_str());
 
 	// look for the file in the current working directory
     msgbuf_t resp = find_first(msg);
@@ -479,7 +498,7 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
 	// if the file wasn't found, search the search_path
 	if(resp[3] == 0xff)
 	{
-printf("open_file: search for file in search path\n");
+		//printf("open_file: search for file in search path\n");
 		string pushd = m_cwd; // push current working directory
 		for (size_t i = 0; i < search_path.size(); i++)
 		{
@@ -500,19 +519,31 @@ printf("open_file: search for file in search path\n");
     resp.resize(4);  // discard short filename and file size
 
     if(0 == resp[3]) // on success, try to open local filename
-        fcb.hdl = open(fcb.local_filename.c_str(), O_RDWR);
+	{
+        hdl = open(fcb.local_filename.c_str(), O_RDWR);
+	}
 
-    printf("open_file(%04x, %d) '%s' ", fcb_addr, fcb.hdl, fcb.local_filename.c_str());
+    printf("open_file(%d) '%s' ", hdl, fcb.local_filename.c_str());
 
-    if(-1 == fcb.hdl)
+    closedir(fcb.d);
+    fcb.d = NULL;
+
+    if(-1 == hdl)
     {
         printf("not found\n");
+		resp[1] = 0xFF;
+		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
     }
     else
     {
         printf("success\n");
+		resp[1] = hdl;
+		resp[2] = ~hdl + 1; // 2's complement
         resp[3] = 0; // success
+		m_fcbs[hdl] = fcb;
+		m_fcbs[hdl].hdl = hdl;
+		m_fcbs[hdl].last_access = time(NULL);
     }
 
     return resp;
@@ -521,27 +552,32 @@ printf("open_file: search for file in search path\n");
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte file handle
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte file handle
 //   1-byte status (0=success, 0xFF=failure)
 //
 msgbuf_t client_t::close_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    int file_handle = get_file_handle(msg);
+    fcb_t& fcb = m_fcbs[file_handle];
 
-    printf("close_file(%04x, %d) '%s'\n", fcb_addr, fcb.hdl, fcb.local_filename.c_str());
+    printf("close_file(%d) '%s'\n", fcb.hdl, fcb.local_filename.c_str());
 
-    reset_fcb(fcb); // close file and reset everything
+	if(fcb.hdl != -1)
+	{
+		close(fcb.hdl);
+		fcb.hdl = -1;
+		m_fcbs.erase(fcb.hdl);
+	}
 
     msgbuf_t resp = msg;
 
     resp.resize(4);  // add byte for status
 
     resp[0] += 1; // set response code
-    // FCB address is set from msg
+    // file handle is set from msg
     resp[3] = 0; // success, we never return an error
     
     return resp;
@@ -550,18 +586,18 @@ msgbuf_t client_t::close_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte file handle
 //   Optional: 2-byte record number
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte file handle
 //   1-byte status (0=success, 1=end of file, 0xFF=failure)
 //  128-byte record (optional, not present if status=0xFF)
 //
 msgbuf_t client_t::read_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    int file_handle = get_file_handle(msg);
+    fcb_t& fcb = m_fcbs[file_handle];
     off_t offset = 0;
     bool off_inc = false;
 
@@ -571,7 +607,7 @@ msgbuf_t client_t::read_file(const msgbuf_t& msg)
         offset = 128 * ((msg[4] << 8) | msg[3]);
     }
 
-    //printf("read_file(%04x, %d) off=%d '%s'\n", fcb_addr, fcb.hdl, offset, fcb.local_filename.c_str());
+    //printf("read_file(%d) off=%d '%s'\n", fcb.hdl, offset, fcb.local_filename.c_str());
 
     msgbuf_t resp(132);
 
@@ -581,6 +617,8 @@ msgbuf_t client_t::read_file(const msgbuf_t& msg)
 
     if(-1 != fcb.hdl)
     {
+		fcb.last_access = time(NULL);
+
         if (off_inc) lseek(fcb.hdl, offset, SEEK_SET);
         
         size_t cnt = read(fcb.hdl, &resp[4], 128);
@@ -607,18 +645,18 @@ msgbuf_t client_t::read_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte file handle
 //   Optional: 2-byte record number
 //  128-byte record
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte file handle
 //   1-byte status (0=success, 5=disk full, 0xFF=failure)
 //
 msgbuf_t client_t::write_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    int file_handle = get_file_handle(msg);
+    fcb_t& fcb = m_fcbs[file_handle];
     off_t offset = 0;
     bool off_inc = false;
 
@@ -628,7 +666,7 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
         offset = 128 * ((msg[4] << 8) | msg[3]);
     }
 
-    //printf("write_file(%04x, %d) off=%d '%s'\n", fcb_addr, fcb.hdl, offset, fcb.local_filename.c_str());
+    //printf("write_file(%d) off=%d '%s'\n", fcb.hdl, offset, fcb.local_filename.c_str());
 
     msgbuf_t resp(4);
 
@@ -638,6 +676,8 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
 
     if(-1 != fcb.hdl)
     {
+		fcb.last_access = time(NULL);
+
         if (off_inc) lseek(fcb.hdl, offset, SEEK_SET);
         
         // start of record moves two bytes when record # is sent
@@ -658,20 +698,18 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignore
 //   8-byte filename
 //   3-byte extension
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte file handle
 //   1-byte status (0=success, 0xFF=failure)
 //
 msgbuf_t client_t::create_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
-
-    reset_fcb(fcb);
+    fcb_t& fcb = m_fcbs[0];
+	int hdl = -1;
 
     string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
     
@@ -682,21 +720,28 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 
     //creat() opens the file with 0_WRONLY which breaks Random File Access!
     //fcb.hdl = creat(filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    fcb.hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
+    hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
         S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
-    printf("create_file(%04x, %d) '%s' ", fcb_addr, fcb.hdl, filename.c_str());
+    printf("create_file(%d) '%s' ", hdl, filename.c_str());
 
-    if(-1 == fcb.hdl)
+    if(-1 == hdl)
     {
         printf("failed\n");
+		resp[1] = 0xFF;
+		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
     }
     else
     {
         printf("success\n");
+		resp[1] = hdl;
+		resp[2] = ~hdl + 1; // 2's complement
         resp[3] = 0; // success
-        fcb.local_filename = filename;
+		m_fcbs[hdl] = fcb;
+		m_fcbs[hdl].hdl = hdl;
+        m_fcbs[hdl].local_filename = filename;
+		m_fcbs[hdl].last_access = time(NULL);
     }
 
     return resp;
@@ -705,22 +750,21 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignore
 //   8-byte filename
 //   3-byte extension
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte 0
 //   1-byte status (0=success, 0xFF=failure)
 //
 msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[0];
 
     msgbuf_t resp = find_first(msg);
 
-    printf("delete_file(%04x) '%s' ", fcb_addr, fcb.local_filename.c_str());
+    printf("delete_file '%s' ", fcb.local_filename.c_str());
 
     resp.resize(4);  // discard short filename and file size
 
@@ -745,28 +789,26 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte FCB address
+//   2-byte ignore
 //   8-byte filename, old
 //   3-byte extension, old
 //   8-byte filename, new
 //   3-byte extension, new
 // Outputs:
 //   1-byte command+1
-//   2-byte FCB address
+//   2-byte 0
 //   1-byte status (0=success, 0xFF=failure)
 //
 msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 {
-    int fcb_addr = get_fcb_addr(msg);
-    fcb_t& fcb = m_fcbs[fcb_addr];
+    fcb_t& fcb = m_fcbs[0];
 
     msgbuf_t resp = find_first(msg);
 
     string oldfn = fcb.local_filename;
     string newfn = cpm2linux((const char*)&msg[14], MAX_FILENAME_LEN);
 
-    printf("rename_file(%04x) '%s'-> '%s' ", fcb_addr,
-        oldfn.c_str(), newfn.c_str());
+    printf("rename_file '%s'-> '%s' ", oldfn.c_str(), newfn.c_str());
 
     resp.resize(4);  // discard filename and file size
 

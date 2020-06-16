@@ -45,7 +45,7 @@
 
 	maclib	ndos
 
-NDOSVER equ 11h		; packed binary coded decimal
+NDOSVER equ 12h		; packed binary coded decimal
 NDOSDSK	equ 15		; drive P is the network drive
 RETRYCNT equ 3          ; number of transceive attempts before failure
 
@@ -58,6 +58,7 @@ NIOSSTAT	equ	9
 FCB?EX		equ	12	; extent (0-31)
 FCB?S2		equ	14	; extent counter (0-15)
 FCB?RC		equ	15	; records used in this extent (0-127)
+FCB?AV		equ	16	; bytes 16-31 are the disk allocation vector
 FCB?CR		equ	32	; current record in this extent (0-127)
 FCB?R0		equ	33	; low-byte of random record #
 FCB?R1		equ	34	; high-byte of random record #
@@ -943,6 +944,15 @@ xcvnofn:
 
 	lda rbuf+4	; status
 	sta status
+        
+        lhld params     ; get uses's FCB
+        lxi d,FCB?AV   ; point to disk allocation vector
+        dad d
+        lda rbuf+2      ; get file handle from server
+        mov m,a         ; write to user's FCB
+        inx h           ; next byte of file handle
+        lda rbuf+3      ; get file handle 2's complement from server
+        mov m,a         ; write to user's FCB
 	ret
 
 	;
@@ -995,6 +1005,11 @@ closefv:
 	mvi b,5		; message length
 	mvi c,NCLOSEF	; network command
 	; de contains FCB address (which we use as a file handle)
+	lxi h,FCB?AV
+	dad d
+	mov e,m
+	inx h
+	mov d,m
 
 	call setupbuf	; setup sbuf header
 
@@ -1021,7 +1036,12 @@ netread:
 	push	b
 	mvi	b,7		; message length
 	mvi	c,NREADF	; network command
-	; de contains FCB address (which we use as a file handle)
+	; de contains FCB address, extract file handle
+        lxi     h,FCB?AV
+        dad     d               ; point to file handle
+        mov     e,m
+        inx     h
+        mov     d,m
 
 	call	setupbuf	; setup sbuf header
 
@@ -1068,7 +1088,12 @@ netwrite:
 	push	b		; save file offset
 	mvi	b,135		; message length
 	mvi	c,NWRITEF	; network command
-	; de contains FCB address (which we use as a file handle)
+	; de contains FCB address, extract file handle
+        lxi     h,FCB?AV
+        dad     d               ; point to file handle
+        mov     e,m
+        inx     h
+        mov     d,m
 	
 	call	setupbuf	; setup sbuf header
 	
@@ -1109,6 +1134,7 @@ renamfv:
 	mvi b,27	; message length
 	mvi c,NRENAMF	; network command
 	; de contains FCB address (which we use as a file handle)
+        lxi d,0
 
 	call setupbuf	; setup sbuf header
 
