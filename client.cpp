@@ -488,9 +488,8 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
     fcb_t& fcb = m_fcbs[0];
 	int hdl = -1;
 
-	string remote;
-	remote.assign((char*)&msg[3], 0, MAX_FILENAME_LEN);
-    printf("open_file '%s'\n", remote.c_str());
+    string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
+    printf("open_file '%s'\n", filename.c_str());
 
 	// look for the file in the current working directory
     msgbuf_t resp = find_first(msg);
@@ -523,14 +522,15 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
         hdl = open(fcb.local_filename.c_str(), O_RDWR);
 	}
 
-    printf("open_file(%d) '%s' ", hdl, fcb.local_filename.c_str());
+    printf("open_file(%d) '%s' ", hdl, filename.c_str());
 
     closedir(fcb.d);
     fcb.d = NULL;
 
     if(-1 == hdl)
     {
-        printf("not found\n");
+		if(0 == resp[3]) printf("%s\n", strerror(errno));
+        else printf("not found\n");
 		resp[1] = 0xFF;
 		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
@@ -727,7 +727,8 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 
     if(-1 == hdl)
     {
-        printf("failed\n");
+        //printf("failed\n");
+		printf("%s\n", strerror(errno));
 		resp[1] = 0xFF;
 		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
@@ -763,8 +764,9 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
     fcb_t& fcb = m_fcbs[0];
 
     msgbuf_t resp = find_first(msg);
+    string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
 
-    printf("delete_file '%s' ", fcb.local_filename.c_str());
+    printf("delete_file '%s' ", filename.c_str());
 
     resp.resize(4);  // discard short filename and file size
 
@@ -774,7 +776,8 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 
     if(-1 == retval)
     {
-        printf("not found\n");
+        if(0 == resp[3]) printf("%s\n", strerror(errno));
+        else printf("not found\n");
         resp[3] = 0xFF; // error
     }
     else
@@ -816,7 +819,8 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 
     if(-1 == retval)
     {
-        printf("not found\n");
+        //printf("not found\n");
+		printf("%s\n", strerror(errno));
         resp[3] = 0xFF; // error
     }
     else

@@ -186,7 +186,7 @@ void read_config()
 
             // add port to client map
             client_t & client = client_map[port];			
-	    client.init(fd, port, root_path);
+			client.init(fd, port, root_path);
             //client.fd = fd;
             //client.name = port;
 		}
@@ -202,6 +202,8 @@ int main()
 {
     read_config();
 
+	// The socket server supports USR-TCP232-302 Serial to Ethernet converter
+	
     struct sockaddr_in my_addr, peer_addr;
     socklen_t peer_addr_size = sizeof(peer_addr);
 
@@ -215,19 +217,19 @@ int main()
     if (-1 == sock_fd)
     {
         printf("socket err=%d\n", errno);
-	exit(1);
+        exit(1);
     }
 
     if(-1 == bind(sock_fd, (struct sockaddr*)&my_addr, sizeof(my_addr)))
     {
         printf("bind err=%d\n", errno);
-	exit(1);
+        exit(1);
     }
 
     if(-1 == listen(sock_fd, 5/*connections*/))
     {
         printf("listen err=%d\n", errno);
-	exit(1);
+        exit(1);
     }
 
     fd_set readfds;
@@ -295,7 +297,7 @@ int main()
             if((client != -1) && (fd != client))
                 close(client);
 
-	    client.init(fd, client_name, root_path);
+            client.init(fd, client_name, root_path);
             //client.fd = fd;
             //client.name = client_name;
         }

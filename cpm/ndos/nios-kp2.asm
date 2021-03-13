@@ -1,10 +1,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; KP2-NIOS.ASM   [Kaypro 2X, should work with II/2/IV/4/10]
+;; NIOS-KP2.ASM   [Kaypro 2X, should work with II/2/IV/4/10]
 ;;
-;; To build KP2-NIOS.SPR:
-;;   RMAC KP2-NIOS $PZ SZ
-;;   LINK KP2-NIOS[OS]
+;; To build NIOS-KP2.SPR:
+;;   RMAC NIOS-KP2 $PZ SZ
+;;   LINK NIOS-KP2[OS]
 ;;
 ;; The Kaypro NIOS uses the 'J4 SERIAL DATA I/O' RS-232 port
 ;; to communicate with the file server. The default rate is

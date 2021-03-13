@@ -58,14 +58,14 @@ NDOSKILL    equ 21          ; Unload NDOS & restore vectors
 ;
 ;  CMD codes are:
 ;
-NFNDFST     equ 02h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NFNDNXT     equ 04h         ; DATA is |FCBlo|FCBhi|
-NOPENF      equ 06h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NCLOSEF     equ 08h         ; DATA is |FCBlo|FCBhi|
-NDELETF     equ 0Ah         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NREADF      equ 0Ch         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|
-NWRITEF     equ 0Eh         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|Datax128|
-NCREATF     equ 10h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NFNDFST     equ 02h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NFNDNXT     equ 04h         ; DATA is |FD|-FD|
+NOPENF      equ 06h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NCLOSEF     equ 08h         ; DATA is |FD|-FD|
+NDELETF     equ 0Ah         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NREADF      equ 0Ch         ; DATA is |FD|-FD|Reclo|Rechi|
+NWRITEF     equ 0Eh         ; DATA is |FD|-FD|Reclo|Rechi|Datax128|
+NCREATF     equ 10h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
 NRENAMF     equ 12h         ; DATA is |NAMEx8|EXTx3|NAMEx8|EXTx3|
 NCHDIR      equ 20h         ; DATA is |Pathv128|
 NMKDIR      equ 22h         ; DATA is |Pathv128|

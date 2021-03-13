@@ -87,16 +87,16 @@ LDNDOS.COM supports three invocation patterns:
   
   - LDNDOS /k *[Unloads NDOS and NIOS and warm starts the system]*
 
-## NIOS.SPR
-
-NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customized 
-for the specific hardware on which it's meant to run. See also KP2-NIOS.ASM (should
-support Kaypro II/2/IV/4/10) and ALTRNIOS.ASM (tested on the Altair Clone).
-
 ## NDOS.SPR
 
 This is the relocatable core of NDOS. It should not require any changes to
 run on CP/M 2.2 systems.
+
+## NIOS.SPR
+
+NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customized 
+for the specific hardware on which it's meant to run. See below for a list of
+supported hardware.
 
 ### Porting Considerations
 
@@ -108,11 +108,14 @@ run on CP/M 2.2 systems.
 	
   - Copy NIOS.ASM and implement init, smsg and rmsg for specific hardware
 	
-  - The ALTRNIOS.ASM is configured to use the second serial port (@12h/13h) of the 
+  - The NIOSALTR.ASM is configured to use the second serial port (@12h/13h) of the 
     88-2SIO Serial Interface Board for the Altair 8800. 
 	
-  - The KP2-NIOS.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
+  - The NIOS-KP2.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
     at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
+
+  - The NIOS-T80.ASM is configured to use the serial port on a TRS 80 Model 4
+    at 19.2Kbps. It should also work on the TRS 80 4/4P/4D.
 
   - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
 
