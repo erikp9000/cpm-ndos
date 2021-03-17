@@ -36,7 +36,6 @@ using namespace std;
 
 
 // map of client names (IP address) to client objects
-typedef std::map<std::string, client_t> client_map_t;
 client_map_t client_map;
 
 // the search path for all clients
@@ -166,29 +165,32 @@ void read_config()
 		for (SizeType i = 0; i < serial_ports.Size(); i++)
 		{
 			string port = serial_ports[i]["port"].GetString();
-			int baud = serial_ports[i]["baud"].GetInt();
+			int baud = serial_ports[i].HasMember("baud") ? serial_ports[i]["baud"].GetInt() : 0;
+			string term = serial_ports[i].HasMember("term") ? serial_ports[i]["term"].GetString() : "dumb";
+            
+			printf("port=%s baud=%d term=%s\n", port.c_str(), baud, term.c_str());
 			
-			printf("port=%s baud=%d\n", port.c_str(), baud);
-			
-			int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
-			if (fd < 0) {
-				printf("Error opening %s: %s\n", port.c_str(), strerror(errno));
-				continue;
-			}
-
-			// baudrate 'baud', 8 bits, no parity, 1 stop bit
-			if(0 != set_interface_attribs(fd, baud))
-			{
-				printf("Error setting baud rate (%d) on port %s\n", baud, port.c_str());
-				close(fd);
-				continue;
-			}
-
+            int fd = -1;
+            if(baud)
+            {
+                fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+                if (fd < 0) {
+                    printf("Error opening %s: %s\n", port.c_str(), strerror(errno));
+                    continue;
+                }
+                
+                // baudrate 'baud', 8 bits, no parity, 1 stop bit
+                if(0 != set_interface_attribs(fd, baud))
+                {
+                    printf("Error setting baud rate (%d) on port %s\n", baud, port.c_str());
+                    close(fd);
+                    continue;
+                }
+            }
+            
             // add port to client map
             client_t & client = client_map[port];			
-			client.init(fd, port, root_path);
-            //client.fd = fd;
-            //client.name = port;
+			client.init(fd, port, root_path, term);
 		}
 	}
 	else
@@ -212,21 +214,21 @@ int main()
     my_addr.sin_port = htons(8234);
     my_addr.sin_addr.s_addr = INADDR_ANY;
 
-    int sock_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0/*protocol*/);
-    //int sock_fd = socket(AF_INET, SOCK_STREAM, 0/*protocol*/);
-    if (-1 == sock_fd)
+    int listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0/*protocol*/);
+
+    if (-1 == listen_fd)
     {
         printf("socket err=%d\n", errno);
         exit(1);
     }
 
-    if(-1 == bind(sock_fd, (struct sockaddr*)&my_addr, sizeof(my_addr)))
+    if(-1 == bind(listen_fd, (struct sockaddr*)&my_addr, sizeof(my_addr)))
     {
         printf("bind err=%d\n", errno);
         exit(1);
     }
 
-    if(-1 == listen(sock_fd, 5/*connections*/))
+    if(-1 == listen(listen_fd, 5/*connections*/))
     {
         printf("listen err=%d\n", errno);
         exit(1);
@@ -239,21 +241,15 @@ int main()
     do {
         FD_ZERO(&readfds);
 
-        int max_fds = sock_fd;
-        FD_SET(sock_fd, &readfds); // add the listen socket descriptor
+        int max_fds = listen_fd;
+        FD_SET(listen_fd, &readfds); // add the listen socket descriptor
 
         // add all client socket descriptors
         for(client_map_t::iterator it = client_map.begin() ;
             it != client_map.end() ;
             ++it)
         {
-            // don't add this client if the file descriptor is invalid
-            if(it->second != -1)
-            {
-                FD_SET(it->second, &readfds);
-                if(it->second > max_fds)
-                    max_fds = it->second;
-            }
+			it->second.add_fds(readfds, max_fds);
         }
 
         timeout.tv_sec = 20;
@@ -272,11 +268,11 @@ int main()
             //printf("timeout occurred (20 second) \n");
             //return 1;
         }
-        else if FD_ISSET(sock_fd, &readfds)
+        else if FD_ISSET(listen_fd, &readfds)
         {
             // accept the connection
             int fd = 
-                accept (sock_fd,(struct sockaddr *) &peer_addr, &peer_addr_size);
+                accept (listen_fd,(struct sockaddr *) &peer_addr, &peer_addr_size);
 
             // accept4() should be able to set O_NONBLOCK too...
             int flags = fcntl(fd, F_GETFL, NULL);
@@ -297,9 +293,7 @@ int main()
             if((client != -1) && (fd != client))
                 close(client);
 
-            client.init(fd, client_name, root_path);
-            //client.fd = fd;
-            //client.name = client_name;
+            client.init(fd, client_name, root_path, "");
         }
         else // determine which client & process received data
         {
@@ -307,12 +301,9 @@ int main()
                 it != client_map.end() ;
                 ++it)
             {
-                if(FD_ISSET(it->second, &readfds))
-                {
-                    //printf("Got data, IP address(%d): %s\n",
-                    //    it->second.fd, it->second.name.c_str());
-                    it->second.recv_request();
-                }
+				// stop polling on the first client to accept the input
+				if(it->second.check_fds(readfds))
+					break;
             }
         }
     } while(1);

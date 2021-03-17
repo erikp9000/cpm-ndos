@@ -1,5 +1,6 @@
 ndos-srv
 *.o
+*.d
 *.prn
 *.hex
 *.bak

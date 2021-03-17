@@ -9,6 +9,8 @@
 	"/bdsc/bdsc160"
   ],
   "serial": [
-    { "port": "/dev/ttyAMA0", "baud": 19200 }
+    { "port": "/dev/ttyUSB0", "baud": 19200, "term": "kaypro2x" },
+    { "port": "192.168.3.116", "term": "trs4" },
+    { "port": "192.168.3.0", "term": "ansi" }
   ]
 }

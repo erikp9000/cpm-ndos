@@ -20,3 +20,5 @@ mac necho $$pz sz
 load necho
 mac nstat $$pz sz
 load nstat
+mac nsh $$pz sz
+load nsh

@@ -5,6 +5,9 @@ program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
+v1.2a Add TRS 80 NIOS for Model 4/4P/4D Montezuma CP/M. Add shell command (NSH) to 
+enable remote client to login to a shell on the server or execute server commands.
+
 v1.2 Dispenses with the FCB address as a file reference. On file open and file create, 
 the server sends its file handle to the client which stores it in the FCB disk allocation 
 vector array and includes it with subsequent calls to read file, write file, and close
@@ -31,20 +34,21 @@ NDOS consists of five major parts:
 
   - LDNDOS.COM - Loads and relocates NIOS and NDOS into upper TPA
   - NIOS.SPR - The network initialization, send, and receive functions
-  - NDOS.SPR – The network OS which hooks the CP/M 2.2 BDOS system calls
+  - NDOS.SPR - The network OS which hooks the CP/M 2.2 BDOS system calls
     and processes all calls on the network drive (P:)  
-  - CCP.COM – A relocatable version of CP/M 2.2 Command Console Processor
-  - ndos-srv – C/C++ Program that runs on a Linux computer
+  - CCP.COM - A relocatable version of CP/M 2.2 Command Console Processor
+  - ndos-srv - C/C++ Program that runs on a Linux computer
 
 There are also several CP/M utilities:
 
-  - CD.COM – Change the working directory on the server & print the working 
+  - CD.COM - Change the working directory on the server & print the working 
     directory
-  - MKDIR.COM – Make a new directory on the server
-  - RMDIR.COM – Remove a directory on the server
-  - NSTAT.COM – Print network statistics
-  - NECHO.COM – Send the string provided on the command line to the server 
+  - MKDIR.COM - Make a new directory on the server
+  - RMDIR.COM - Remove a directory on the server
+  - NSTAT.COM - Print network statistics
+  - NECHO.COM - Send the string provided on the command line to the server 
     and print the response
+  - NSH.COM - Execute shell commands on server or log-into shell
 
 ## Known Issues
 
@@ -98,6 +102,15 @@ NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customize
 for the specific hardware on which it's meant to run. See below for a list of
 supported hardware.
 
+  - NIOSALTR.ASM is configured to use the second serial port (@12h/13h) of the 
+    88-2SIO Serial Interface Board for the Altair 8800. 
+	
+  - NIOS-KP2.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
+    at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
+
+  - NIOS-T80.ASM is configured to use the serial port on a TRS 80 Model 4
+    at 19.2Kbps. It should also work on the TRS 80 4/4P/4D.
+
 ### Porting Considerations
 
   - Tools required are:
@@ -108,15 +121,6 @@ supported hardware.
 	
   - Copy NIOS.ASM and implement init, smsg and rmsg for specific hardware
 	
-  - The NIOSALTR.ASM is configured to use the second serial port (@12h/13h) of the 
-    88-2SIO Serial Interface Board for the Altair 8800. 
-	
-  - The NIOS-KP2.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
-    at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
-
-  - The NIOS-T80.ASM is configured to use the serial port on a TRS 80 Model 4
-    at 19.2Kbps. It should also work on the TRS 80 4/4P/4D.
-
   - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
 
 ### BDOS Function Summary
@@ -186,8 +190,9 @@ JSON format.
       "root": "cpm",
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
-        { "port": "/dev/ttyAMA0", "baud": 9600 },
-        { "port": "/dev/ttyUSB0", "baud": 19200 }
+        { "port": "/dev/ttyAMA0", "baud": 9600, "term": "ansi" },
+        { "port": "/dev/ttyUSB0", "baud": 19200, "term": "kaypro" },
+        { "port": "192.168.3.1", "baud": 0, "term": "trs4" }
       ]
     }
 
@@ -543,4 +548,25 @@ Response:
 | ----| ----- | -------- |
 | 31h | Msgv128 | Variable-length message returned. |
 
+
+#### Shell
+
+The client sets Type=0 to execute the shell command in Msgv128. If
+the client does not specify a shell command, the server starts bash.
+The client polls for stdout bytes by setting Type=1. The client may
+optionally include stdin bytes to send to the server.
+
+Request:
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 32h | Type  | 0=shell command, 1=stdin bytes/poll |
+|     |Msgv128| shell command / stdin bytes |
+
+Response:
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 33h | Type  | 0=no stdout bytes, 1=stdout bytes, 0xFF=exit |
+|     |Msgv128| stdout bytes |
 
