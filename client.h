@@ -97,7 +97,7 @@ public:
 
 	void recv_request();
 
-    void init(int fd, string name, string root, string term);
+    void init(int fd, string name, string root);
 
     string name() { return m_name; }
 	
@@ -128,7 +128,7 @@ protected:
     msgbuf_t echo(const msgbuf_t& msg);
     msgbuf_t shell(const msgbuf_t& msg);
 
-    bool launch_shell_command(const string& args);
+    bool launch_shell_command(const string& commandline);
 	//void send_stdout(const string& msg);
 	void send_stdout(const msgbuf_t& msg);
     void send_stdout(const char *fmt, ...);

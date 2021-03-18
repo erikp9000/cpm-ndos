@@ -165,10 +165,9 @@ void read_config()
 		for (SizeType i = 0; i < serial_ports.Size(); i++)
 		{
 			string port = serial_ports[i]["port"].GetString();
-			int baud = serial_ports[i].HasMember("baud") ? serial_ports[i]["baud"].GetInt() : 0;
-			string term = serial_ports[i].HasMember("term") ? serial_ports[i]["term"].GetString() : "dumb";
+			int baud = serial_ports[i]["baud"].GetInt();
             
-			printf("port=%s baud=%d term=%s\n", port.c_str(), baud, term.c_str());
+			printf("port=%s baud=%d\n", port.c_str(), baud);
 			
             int fd = -1;
             if(baud)
@@ -190,7 +189,7 @@ void read_config()
             
             // add port to client map
             client_t & client = client_map[port];			
-			client.init(fd, port, root_path, term);
+			client.init(fd, port, root_path);
 		}
 	}
 	else
@@ -293,7 +292,7 @@ int main()
             if((client != -1) && (fd != client))
                 close(client);
 
-            client.init(fd, client_name, root_path, "");
+            client.init(fd, client_name, root_path);
         }
         else // determine which client & process received data
         {

@@ -560,7 +560,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 32h | Type  | 0=shell command, 1=stdin bytes/poll |
+| 32h | Type  | 0=shell command in Msgv128 |
+|     |       | 1=stdin bytes in Msgv128 (empty for a poll) |
 |     |Msgv128| shell command / stdin bytes |
 
 Response:

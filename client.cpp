@@ -32,7 +32,9 @@ client_t::client_t()
     m_dir = NULL;
     m_de = NULL;
     
-    init(-1/*fd*/, ""/*name*/, "."/*root*/, "dumb"/*term*/);
+    m_term = "dumb";
+    
+    init(-1/*fd*/, ""/*name*/, "."/*root*/);
 }
 
 client_t::~client_t()
@@ -54,12 +56,11 @@ client_t::~client_t()
     m_fcbs.clear();
 }
 
-void client_t::init(int fd, string name, string root, string term) 
+void client_t::init(int fd, string name, string root) 
 {
     m_fd = fd;
     if(name.length()) m_name = name;
     if(m_cwd == ".") m_cwd = root;
-    if(term.length()) m_term = term;
     
     m_offset = 0;
     m_cnt = 1;
@@ -1216,13 +1217,31 @@ msgbuf_t client_t::shell(const msgbuf_t& msg)
 }
 
 
-bool client_t::launch_shell_command(const string& args)
+bool client_t::launch_shell_command(const string& commandline)
 {
+    string args = commandline;
+    
     m_shell_buf.clear();
+      
+    // First char of '/' indicates the terminal type
+    if((args.length() > 2) && (args.substr(0, 2) == " /"))
+    {
+        int offset_to_space = args.find(' ', 2);
+        if(-1 == offset_to_space)
+        {
+            m_term = args.substr(2);
+            args.clear();
+        }
+        else
+        {
+            m_term = args.substr(2, offset_to_space - 2);
+            args = args.substr(offset_to_space + 1);
+        }
+    }
+    //printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
+    while(' ' == args[0]) args.erase(0, 1);
     
-    printf("launch_shell_command: '%s'\n", args.c_str());
-    
-	send_stdout("\r\nExecuting remote shell command: '%s'\r\n", args.c_str());
+    printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
 
     // forkpty() calls posix_openpt() to get a pseudo-tty, 
     // forks the process, opens the slave-side of the pty
@@ -1246,10 +1265,9 @@ bool client_t::launch_shell_command(const string& args)
 		//printf("I'm the child\n");
         
         // Send to remote client
-        printf("You are connected from: %s\n", m_name.c_str());
+        printf("\nYou are connected from: %s\n", m_name.c_str());
         printf("Your terminal is: %s (%s)\n", ttyname.c_str(), m_term.c_str());
-        printf("Use: export TERM=<option> to change terminal type.\r\n");
-        printf("or change in config.json file.\n\n");
+        printf("To change terminal type, use: nsh /terminal args\n\n");
         
         // set terminal from config file or "dumb" 
         setenv("TERM", m_term.c_str(), 1/*overwrite*/);
