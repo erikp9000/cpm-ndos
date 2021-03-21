@@ -9,7 +9,7 @@ v1.2a Add TRS 80 NIOS for Model 4/4P/4D Montezuma CP/M. Add shell command (NSH) 
 enable remote client to login to a shell on the server or execute server commands.
 
 v1.2 Dispenses with the FCB address as a file reference. On file open and file create, 
-the server sends its file handle to the client which stores it in the FCB disk allocation 
+the server returns its file handle to the client who stores it in the FCB disk allocation 
 vector array and includes it with subsequent calls to read file, write file, and close
 file. This was a necessary change to support the BD Software C Compiler (BDSC) which re-uses
 the same FCB (005Ch) to access multiple files.
@@ -49,6 +49,10 @@ There are also several CP/M utilities:
   - NECHO.COM - Send the string provided on the command line to the server 
     and print the response
   - NSH.COM - Execute shell commands on server or log-into shell
+    - `nsh /trs4` - starts a Bash shell on the server with TERM=trs4
+    - `nsh /kaypro2x telnet` - starts a Bash shell on the server with TERM=kaypro2x 
+       and launches telnet
+    - It is not necessary to specify the terminal after the first invokation
 
 ## Known Issues
 
@@ -91,11 +95,6 @@ LDNDOS.COM supports three invocation patterns:
   
   - LDNDOS /k *[Unloads NDOS and NIOS and warm starts the system]*
 
-## NDOS.SPR
-
-This is the relocatable core of NDOS. It should not require any changes to
-run on CP/M 2.2 systems.
-
 ## NIOS.SPR
 
 NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customized 
@@ -122,6 +121,11 @@ supported hardware.
   - Copy NIOS.ASM and implement init, smsg and rmsg for specific hardware
 	
   - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
+  
+## NDOS.SPR
+
+This is the relocatable core of NDOS. It should not require any changes to
+run on CP/M 2.2 systems.
 
 ### BDOS Function Summary
 
@@ -190,9 +194,8 @@ JSON format.
       "root": "cpm",
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
-        { "port": "/dev/ttyAMA0", "baud": 9600, "term": "ansi" },
-        { "port": "/dev/ttyUSB0", "baud": 19200, "term": "kaypro" },
-        { "port": "192.168.3.1", "baud": 0, "term": "trs4" }
+        { "port": "/dev/ttyAMA0", "baud": 9600 },
+        { "port": "/dev/ttyUSB0", "baud": 19200 },
       ]
     }
 
@@ -245,8 +248,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 02h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 02h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name, supports wildcard character '?' |
 |     | EXTx3 | File extension, supports wildcard character '?' | 
 
@@ -254,8 +257,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 03h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 03h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=end of directory |
 |     | NAMEx8| File name - not present if STAT=0xFF |
 |     | EXTx3 | File extension - not present if STAT=0xFF | 
@@ -300,8 +303,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 04h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 04h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| Optional File name, supports wildcard character '?' |
 |     | EXTx3 | Optional File extension, supports wildcard character '?' | 
 
@@ -322,8 +325,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 06h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 06h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name with optional wildcard character '?' |
 |     | EXTx3 | File extension with optional wildcard character '?' | 
 
@@ -364,8 +367,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0ah | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 0ah | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -373,8 +376,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0bh | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 0bh | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=not found/access denied/etc. |
 
 
@@ -439,8 +442,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 10h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 10h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -461,8 +464,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 12h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 12h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | oldNAMEx8| Old File name |
 |     | oldEXTx3 | Old File extension | 
 |     | newNAMEx8| New File name |
@@ -472,8 +475,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 13h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 13h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=failure |
 
 

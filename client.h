@@ -11,6 +11,9 @@
 #include <string>
 #include <map>
 
+// Only needed this to get a v1.0 system upgraded to v1.2
+#undef BACKCOMPAT
+
 using namespace std;
 
 typedef vector<uint8_t> msgbuf_t;
@@ -61,7 +64,7 @@ public:
         }
     };
     
-    void set(int hdl, const string &filename)
+    void set(const int hdl, const string &filename)
     {
         m_hdl = hdl;
         m_local_filename = filename;
@@ -85,8 +88,13 @@ protected:
 	time_t m_last_access;
 };
 
-typedef std::map<uint16_t,fcb_t> fcb_map_t;
+// Map server file handles (from client) to the local file control block
+typedef std::map<uint16_t/*file handle*/,fcb_t/*local file control block*/> fcb_map_t;
 
+#ifdef BACKCOMPAT
+// For v1.0 and v1.1 compatibility, keep FCB address from open_file() and create_file()
+typedef std::map<uint16_t/*remote FCB address*/,uint16_t/*file handle*/> fcb_to_hdl_t;
+#endif
 
 class client_t 
 {
@@ -140,7 +148,10 @@ private:
 
 private:
     string m_cwd;                   // current working directory
-    fcb_map_t m_fcbs;               // file control block map
+    fcb_map_t m_fcbs;               // file control block map, hdl -> fcb_map_t
+#ifdef BACKCOMPAT
+    fcb_to_hdl_t m_fcb_to_hdl;      // compatibility map, fcb_addr -> hdl
+#endif
 
     int m_fd;                       // I/O file descriptor for receiving & sending messages
     string m_name;                  // IP address of the client or serial port device name

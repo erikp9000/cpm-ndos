@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <pty.h>
 #include <stdarg.h>
+#include <signal.h>
 
 #undef DEBUG
 
@@ -334,30 +335,43 @@ void client_t::reset_dir()
 
 int client_t::get_file_handle(const msgbuf_t& msg)
 {
+    // v1.2 expects the client to send the server file handle
+    // and its 2's complement
 	if(0 == ((msg[1] + msg[2]) & 255))
 		return msg[1];
-	else
-		return -1; // bad file handle
+#ifdef BACKCOMPAT
+else
+    {
+        // v1.0 and 1.1 used FCB address instead of the file handle
+        // Using the FCB address as a synonym for a file handle didn't
+        // work in all cases because some programs moved the FCB data
+        // for different files into and out of the same FCB address.
+        int fcb_addr = msg[1] + 256 * msg[2];
+        fcb_to_hdl_t::iterator it = m_fcb_to_hdl.find(fcb_addr);
+        if(it != m_fcb_to_hdl.end())
+        {
+            return it->second; // return file handle
+        }        
+    }
+#endif
+	return -1; // bad file handle
 }
 
 // TODO handle long filenames by hashing name to a CRC
-static char out[12];
-static char* GetShortFilename(char* name)
+static string GetShortFilename(char* name)
 {
     int i,j;
-
-    memset(out, ' ', MAX_FILENAME_LEN);
-    out[MAX_FILENAME_LEN] = 0;
+    string retstr(MAX_FILENAME_LEN, ' ');
 
     for(i=0, j=0 ; (j<MAX_FILENAME_LEN) && (name[i]) ; ++i,++j)
     {
         if(name[i] == '.')
             j = 7;
         else
-            out[j] = toupper(name[i]);
+            retstr[j] = toupper(name[i]);
     }
 
-    return out;
+    return retstr;
 }
 
 static string cpm2linux(const char* str, size_t len)
@@ -384,7 +398,7 @@ static string cpm2linux(const char* str, size_t len)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignored
+//   2-byte client FCB address (not used)
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
@@ -444,7 +458,7 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignored
+//   2-byte client FCB address (not used)
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
@@ -598,7 +612,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignored
+//   2-byte client FCB address (not used)
 //   8-byte filename
 //   3-byte extension
 //     '?' matches any character in filename/extension
@@ -610,6 +624,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
 msgbuf_t client_t::open_file(const msgbuf_t& msg)
 {
 	int hdl = -1;
+    uint16_t fcb_addr = msg[1] + 256 * msg[2];
 
 	// look for the file in the current working directory
     msgbuf_t resp = find_first(msg);
@@ -654,7 +669,7 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
         hdl = open(m_local_filename.c_str(), O_RDWR);
 	}
 
-    printf("open_file(%d) '%s' ", hdl, m_local_filename.c_str());
+    printf("open_file(%d) '%s' fcb_addr=0x%04X ", hdl, m_local_filename.c_str(), fcb_addr);
 
     if(-1 == hdl)
     {
@@ -672,6 +687,10 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
         resp[3] = 0; // success
 		fcb_t& fcb = m_fcbs[hdl];
         fcb.set(hdl, m_local_filename);
+#ifdef BACKCOMPAT
+        // v1.0 and 1.1 compatibility
+        m_fcb_to_hdl[fcb_addr] = hdl;
+#endif        
     }
 
     reset_dir();
@@ -826,7 +845,7 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignore
+//   2-byte client FCB address (not used)
 //   8-byte filename
 //   3-byte extension
 // Outputs:
@@ -837,6 +856,7 @@ msgbuf_t client_t::write_file(const msgbuf_t& msg)
 msgbuf_t client_t::create_file(const msgbuf_t& msg)
 {
 	int hdl = -1;
+    uint16_t fcb_addr = msg[1] + 256 * msg[2];
 
     msgbuf_t resp(4);
     resp[0] = msg[0] + 1;
@@ -844,12 +864,12 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
     resp[2] = msg[2];
 
     string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
-
-    printf("create_file '%s' ", filename.c_str());
-    
+   
     // creat() opens the file with O_WRONLY which breaks Random File Access!
     hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
         S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+    printf("create_file(%d) '%s' fcb_addr=0x%04X ", hdl, filename.c_str(), fcb_addr);
 
     if(-1 == hdl)
     {
@@ -866,6 +886,10 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
         resp[3] = 0; // success
 		fcb_t& fcb = m_fcbs[hdl];
         fcb.set(hdl, filename);
+#ifdef BACKCOMPAT        
+        // v1.0 and 1.1 compatibility
+        m_fcb_to_hdl[fcb_addr] = hdl;
+#endif        
     }
 
     return resp;
@@ -874,7 +898,7 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignore
+//   2-byte client FCB address (not used)
 //   8-byte filename
 //   3-byte extension
 // Outputs:
@@ -912,7 +936,7 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 
 // Inputs:
 //   1-byte command
-//   2-byte ignore
+//   2-byte client FCB address (not used)
 //   8-byte filename, old
 //   3-byte extension, old
 //   8-byte filename, new
@@ -1161,11 +1185,19 @@ msgbuf_t client_t::shell(const msgbuf_t& msg)
             {
                 *it = (char) tolower(*it);
             }
-            // if there's already a shell, we need to kill it
+            // if there's an abandoned shell, we need to kill it
+            if(-1 != m_child_pid)
+            {
+                kill(m_child_pid, SIGHUP);
+                m_child_pid = -1;
+            }
+            // close any open handle
             if(-1 != m_fd_pty)
             {
-                // TODO kill abandoned shell
+                close (m_fd_pty);
+                m_fd_pty = -1;
             }
+            // now start a new shell
             launch_shell_command(buffer);
             break;
         case 1: // buffer is stdin bytes (can be empty)

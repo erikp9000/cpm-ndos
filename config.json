@@ -9,6 +9,6 @@
 	"/bdsc/bdsc160"
   ],
   "serial": [
-    { "port": "/dev/ttyUSB0", "baud": 19200 }
+    { "port": "/dev/ttyUSB0", "baud": 9600 }
   ]
 }
