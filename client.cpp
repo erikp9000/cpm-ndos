@@ -446,10 +446,11 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
 				it->second.local_filename().c_str());
 		
             //printf("Calling fcb erase\n");
-			it = m_fcbs.erase(it);            
+            fcb_map_t::iterator era_it = it++;
+			m_fcbs.erase(era_it);
 		}
         else
-            it++;
+            ++it;
 	}
 	
     return find_next(msg);
