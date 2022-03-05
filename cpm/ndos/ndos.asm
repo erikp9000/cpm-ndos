@@ -1240,25 +1240,25 @@ wrtrfv:
 
 
 	; Panic exit
-panic:	call isnetdsk	; doesn't return if not network disk
+panic:	call    isnetdsk	; doesn't return if not network disk
 
-	mov a,c		; convert function code to hexadecimal
+	mov     a,c		; convert function code to hexadecimal
 	rrc
 	rrc
 	rrc
 	rrc
-	call getHexChar
-	sta panicarg
-	mov a,c
-	call getHexChar
-	sta panicarg+1	
-	mvi c,prnstr
-	lxi d,panicmsg
-	call 5
+	call    getHexChar
+	sta     panicarg
+	mov     a,c
+	call    getHexChar
+	sta     panicarg+1	
+	mvi     c,prnstr
+	lxi     d,panicmsg
+	call    bdosv
 
 	; We are aborting the program because it's trying to do
 	; something we don't support.
-	jmp warm	; reload CCP.COM
+	jmp     warm            ; reload CCP.COM
 
 lastaddr:
 
