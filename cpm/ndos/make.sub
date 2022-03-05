@@ -8,6 +8,8 @@ rmac nios-kp2 $$pz sz
 link nios-kp2[os]
 rmac nios-t80 $$pz sz
 link nios-t80[os]
+era *.rel
+era *.sym
 mac ldndos $$pz sz
 load ldndos
 mac cd $$pz sz
@@ -22,3 +24,4 @@ mac nstat $$pz sz
 load nstat
 mac nsh $$pz sz
 load nsh
+era *.hex
