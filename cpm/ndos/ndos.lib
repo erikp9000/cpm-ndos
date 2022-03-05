@@ -38,6 +38,10 @@ n?ver       equ 40h         ; returns NDOS version as major.minor, packed BCD in
 n?smsg      equ 41h         ; sends packet referenced by DE, HL=A=0(success)/FF(timeout)
 n?rmsg      equ 42h         ; returns recvd packet in DE, HL=A=0(success)/FF(timeout)
 n?stats     equ 43h         ; return HL pointing to NDOS packet counters
+                            ;   sentcnt: dw 0 ; count of messages sent
+                            ;   recvcnt: dw 0 ; count of messages received
+                            ;   tocnt:   dw 0 ; count of timed-out messages
+                            ;   chkcnt:  dw 0 ; count of messages with bad checksum
 n?init      equ 44h         ; initialize the network stack, HL=A=0(success)/FF(timeout)
 
 
