@@ -1,13 +1,18 @@
 #pragma once
 
+#include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <dirent.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <vector>
 #include <string>
 #include <map>
+
+// Only needed this to get a v1.0 system upgraded to v1.2
+#undef BACKCOMPAT
 
 using namespace std;
 
@@ -31,43 +36,83 @@ extern string root_path;
 #define CMD_REMOVEDIR  0x24
 
 #define CMD_ECHO       0x30
+#define CMD_SHELL      0x32
 
-typedef struct fcb {
-    fcb() {
-        d = NULL;
-        de = NULL;
-        hdl = -1;
-    }
-    DIR* d;
-    struct dirent *de;
-    std::string filter;
-    std::string local_filename;
-    int hdl;
-	time_t last_access;
-} fcb_t;
 
-typedef std::map<uint16_t,fcb_t> fcb_map_t;
-
-class client_t {
+class fcb_t 
+{
 public:
-    client_t() {
-        m_cwd = ".";
-        m_fd = -1;
+    fcb_t() {
+        //printf("fcb_t default constructor %p\n", this);
+        m_hdl = -1;
+        m_last_access = 0;
     }
-    virtual ~client_t() {}
+    fcb_t (const fcb_t &obj)
+    {
+        //printf("fcb_t copy constructor %p\n", this);
+        m_hdl = obj.m_hdl;
+        m_local_filename = obj.m_local_filename;
+        m_last_access = obj.m_last_access;
+    }
+    virtual ~fcb_t() {
+        //printf("fcb_t destructor %p hdl=%d name='%s'\n", this, m_hdl, m_local_filename.c_str());
+        if(-1 != m_hdl)
+        {
+            //printf("fcb_t close hdl=%d\n", m_hdl);
+            close(m_hdl);
+            m_hdl = -1;
+        }
+    };
+    
+    void set(const int hdl, const string &filename)
+    {
+        m_hdl = hdl;
+        m_local_filename = filename;
+        m_last_access = time(NULL);
+    }
+    void accessed()
+    {
+        m_last_access = time(NULL);
+    }
+    bool timeout(const time_t &timer)
+    {
+        return (m_hdl > 0) && (time(NULL) - m_last_access > timer);
+    }
+
+    const int hdl() { return m_hdl; }
+    const string& local_filename() { return m_local_filename; }
+    
+protected:
+    std::string m_local_filename;
+    int m_hdl;
+	time_t m_last_access;
+};
+
+// Map server file handles (from client) to the local file control block
+typedef std::map<uint16_t/*file handle*/,fcb_t/*local file control block*/> fcb_map_t;
+
+#ifdef BACKCOMPAT
+// For v1.0 and v1.1 compatibility, keep FCB address from open_file() and create_file()
+typedef std::map<uint16_t/*remote FCB address*/,uint16_t/*file handle*/> fcb_to_hdl_t;
+#endif
+
+class client_t 
+{
+public:
+    client_t();
+    //client_t (const client_t &obj);
+    virtual ~client_t();
 
 	void recv_request();
 
-    void init(int fd, string name, string root) {
-        m_fd = fd;
-        if(name.length()) m_name = name;
-        if(m_cwd == ".") m_cwd = root;
-    }
+    void init(int fd, string name, string root);
 
     string name() { return m_name; }
 	
     operator int() const { return m_fd; }
 
+    void add_fds(fd_set& readfds, int& max_fds);
+	bool check_fds(fd_set& readfds);
 
 protected:
 	void send_resp(const msgbuf_t &resp);
@@ -89,23 +134,43 @@ protected:
     msgbuf_t remove_dir(const msgbuf_t& msg);
 
     msgbuf_t echo(const msgbuf_t& msg);
+    msgbuf_t shell(const msgbuf_t& msg);
+
+    bool launch_shell_command(const string& commandline);
+	//void send_stdout(const string& msg);
+	void send_stdout(const msgbuf_t& msg);
+    void send_stdout(const char *fmt, ...);
+    string get_stdout();
 
 private:
-    void reset_fcb(fcb_t & fcb);
+    void reset_dir();
     int get_file_handle(const msgbuf_t& msg);
 
 private:
-    string m_cwd;  // current working directory
-    fcb_map_t m_fcbs;  // file control block map
+    string m_cwd;                   // current working directory
+    fcb_map_t m_fcbs;               // file control block map, hdl -> fcb_map_t
+#ifdef BACKCOMPAT
+    fcb_to_hdl_t m_fcb_to_hdl;      // compatibility map, fcb_addr -> hdl
+#endif
 
-    int m_fd;           // I/O file descriptor for receiving & sending messages
-    string m_name; // IP address of the client or serial port device name
+    int m_fd;                       // I/O file descriptor for receiving & sending messages
+    string m_name;                  // IP address of the client or serial port device name
 	
 	// receive buffer
 	unsigned char m_buffer[512];
     int m_offset;
     int m_cnt;
+
+	pid_t m_child_pid;		        // process ID of shell command
+    int m_fd_pty;                   // pseudo terminal for remote client
+	string m_shell_buf;             // the shell command stdout buffer
+    string m_term;                  // remote client terminal type
+    
+    DIR* m_dir;                     // pointer to directory
+    struct dirent *m_de;            // pointer to directory entry
+    std::string m_srch_filter;      // search filter from client
+    std::string m_local_filename;   // local filename matching search filter
 };
 
-
-
+typedef std::map<std::string, client_t> client_map_t;
+extern client_map_t client_map;

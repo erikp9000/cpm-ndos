@@ -20,10 +20,10 @@
 	; Jump table used by NDOS to access network functions
         ; (Don't put anything before these or NDOS will be broken.)
         ;
-	jmp init
-	jmp smsg
-	jmp rmsg
-	jmp nstat
+	jmp     init
+	jmp     smsg
+	jmp     rmsg
+	jmp     nstat
 
         ; return success/failure code
         
@@ -50,8 +50,15 @@ chkcnt:	dw 0		; count of messages with bad checksum
 	; Outputs:
 	;     a = 0(success)/FF(failure)
 	;
-init:   jmp     failure
-
+init:   mvi     c,prnstr
+        lxi     d,warn
+        call    bdosv
+        jmp     failure
+        
+warn:
+        db      cr,lf,'NIOS.SPR does not implement a network.',cr,lf
+        db      'Is that what you wanted?',cr,lf
+        db      '$'
 
 	;
 	; Send message
@@ -89,6 +96,6 @@ rmsg:   jmp     failure
 	; Outputs:
 	;     hl = pointer
 	;
-nstat:	lxi h,sentcnt
+nstat:	lxi     h,sentcnt
 	ret
 

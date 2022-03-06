@@ -5,8 +5,11 @@ program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
+v1.2a Add TRS 80 NIOS for Model 4/4P/4D Montezuma CP/M. Add shell command (NSH) to 
+enable remote client to login to a shell on the server or execute server commands.
+
 v1.2 Dispenses with the FCB address as a file reference. On file open and file create, 
-the server sends its file handle to the client which stores it in the FCB disk allocation 
+the server returns its file handle to the client who stores it in the FCB disk allocation 
 vector array and includes it with subsequent calls to read file, write file, and close
 file. This was a necessary change to support the BD Software C Compiler (BDSC) which re-uses
 the same FCB (005Ch) to access multiple files.
@@ -31,20 +34,25 @@ NDOS consists of five major parts:
 
   - LDNDOS.COM - Loads and relocates NIOS and NDOS into upper TPA
   - NIOS.SPR - The network initialization, send, and receive functions
-  - NDOS.SPR – The network OS which hooks the CP/M 2.2 BDOS system calls
+  - NDOS.SPR - The network OS which hooks the CP/M 2.2 BDOS system calls
     and processes all calls on the network drive (P:)  
-  - CCP.COM – A relocatable version of CP/M 2.2 Command Console Processor
-  - ndos-srv – C/C++ Program that runs on a Linux computer
+  - CCP.COM - A relocatable version of CP/M 2.2 Command Console Processor
+  - ndos-srv - C/C++ Program that runs on a Linux computer
 
 There are also several CP/M utilities:
 
-  - CD.COM – Change the working directory on the server & print the working 
+  - CD.COM - Change the working directory on the server & print the working 
     directory
-  - MKDIR.COM – Make a new directory on the server
-  - RMDIR.COM – Remove a directory on the server
-  - NSTAT.COM – Print network statistics
-  - NECHO.COM – Send the string provided on the command line to the server 
+  - MKDIR.COM - Make a new directory on the server
+  - RMDIR.COM - Remove a directory on the server
+  - NSTAT.COM - Print network statistics
+  - NECHO.COM - Send the string provided on the command line to the server 
     and print the response
+  - NSH.COM - Execute shell commands on server or log-into shell
+    - `nsh /trs4` - starts a Bash shell on the server with TERM=trs4
+    - `nsh /kaypro2x telnet` - starts a Bash shell on the server with TERM=kaypro2x 
+       and launches telnet
+    - It is not necessary to specify the terminal after the first invokation
 
 ## Known Issues
 
@@ -90,13 +98,17 @@ LDNDOS.COM supports three invocation patterns:
 ## NIOS.SPR
 
 NIOS.ASM is an example of the NIOS used by the NDOS. This file must be customized 
-for the specific hardware on which it's meant to run. See also KP2-NIOS.ASM (should
-support Kaypro II/2/IV/4/10) and ALTRNIOS.ASM (tested on the Altair Clone).
+for the specific hardware on which it's meant to run. See below for a list of
+supported hardware.
 
-## NDOS.SPR
+  - NIOSALTR.ASM is configured to use the second serial port (@12h/13h) of the 
+    88-2SIO Serial Interface Board for the Altair 8800. 
+	
+  - NIOS-KP2.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
+    at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
 
-This is the relocatable core of NDOS. It should not require any changes to
-run on CP/M 2.2 systems.
+  - NIOS-T80.ASM is configured to use the serial port on a TRS 80 Model 4
+    at 19.2Kbps. It should also work on the TRS 80 4/4P/4D.
 
 ### Porting Considerations
 
@@ -108,13 +120,12 @@ run on CP/M 2.2 systems.
 	
   - Copy NIOS.ASM and implement init, smsg and rmsg for specific hardware
 	
-  - The ALTRNIOS.ASM is configured to use the second serial port (@12h/13h) of the 
-    88-2SIO Serial Interface Board for the Altair 8800. 
-	
-  - The KP2-NIOS.ASM is configured to use the 'J4 SERIAL DATA I/O' port on a Kaypro 2X
-    at 19.2Kbps. It should also work on the Kaypro II/2/IV/4/10.
-
   - The network drive is P:. Change NDOSDSK in NDOS.ASM to select another drive.
+  
+## NDOS.SPR
+
+This is the relocatable core of NDOS. It should not require any changes to
+run on CP/M 2.2 systems.
 
 ### BDOS Function Summary
 
@@ -184,7 +195,7 @@ JSON format.
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
         { "port": "/dev/ttyAMA0", "baud": 9600 },
-        { "port": "/dev/ttyUSB0", "baud": 19200 }
+        { "port": "/dev/ttyUSB0", "baud": 19200 },
       ]
     }
 
@@ -237,8 +248,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 02h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 02h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name, supports wildcard character '?' |
 |     | EXTx3 | File extension, supports wildcard character '?' | 
 
@@ -246,8 +257,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 03h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 03h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=end of directory |
 |     | NAMEx8| File name - not present if STAT=0xFF |
 |     | EXTx3 | File extension - not present if STAT=0xFF | 
@@ -292,8 +303,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 04h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 04h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| Optional File name, supports wildcard character '?' |
 |     | EXTx3 | Optional File extension, supports wildcard character '?' | 
 
@@ -314,8 +325,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 06h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 06h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name with optional wildcard character '?' |
 |     | EXTx3 | File extension with optional wildcard character '?' | 
 
@@ -356,8 +367,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0ah | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 0ah | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -365,8 +376,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 0bh | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 0bh | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=not found/access denied/etc. |
 
 
@@ -431,8 +442,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 10h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 10h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | NAMEx8| File name |
 |     | EXTx3 | File extension | 
 
@@ -453,8 +464,8 @@ Request:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 12h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 12h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | oldNAMEx8| Old File name |
 |     | oldEXTx3 | Old File extension | 
 |     | newNAMEx8| New File name |
@@ -464,8 +475,8 @@ Response:
 
 | CMD | DATA  | Comments |
 | ----| ----- | -------- |
-| 13h | Byte  | Ignored  |
-|     | Byte  | Ignored  |
+| 13h | Byte  | FCBlo - not used  |
+|     | Byte  | FCBhi - not used  |
 |     | STAT  | 0=success, 0xFF=failure |
 
 
@@ -540,4 +551,26 @@ Response:
 | ----| ----- | -------- |
 | 31h | Msgv128 | Variable-length message returned. |
 
+
+#### Shell
+
+The client sets Type=0 to execute the shell command in Msgv128. If
+the client does not specify a shell command, the server starts bash.
+The client polls for stdout bytes by setting Type=1. The client may
+optionally include stdin bytes to send to the server.
+
+Request:
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 32h | Type  | 0=shell command in Msgv128 |
+|     |       | 1=stdin bytes in Msgv128 (empty for a poll) |
+|     |Msgv128| shell command / stdin bytes |
+
+Response:
+
+| CMD | DATA  | Comments |
+| ----| ----- | -------- |
+| 33h | Type  | 0=no stdout bytes, 1=stdout bytes, 0xFF=exit |
+|     |Msgv128| stdout bytes |
 

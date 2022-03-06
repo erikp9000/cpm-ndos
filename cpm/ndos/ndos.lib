@@ -17,6 +17,7 @@ lf          equ 0ah
 ;
 conin       equ 1
 conout      equ 2
+dircon      equ 6           ;e=ffh input, else e=output char; returns char in a 0=nochar
 prnstr      equ 9
 constat     equ 0bh
 rstdsk      equ 0dh
@@ -37,6 +38,10 @@ n?ver       equ 40h         ; returns NDOS version as major.minor, packed BCD in
 n?smsg      equ 41h         ; sends packet referenced by DE, HL=A=0(success)/FF(timeout)
 n?rmsg      equ 42h         ; returns recvd packet in DE, HL=A=0(success)/FF(timeout)
 n?stats     equ 43h         ; return HL pointing to NDOS packet counters
+                            ;   sentcnt: dw 0 ; count of messages sent
+                            ;   recvcnt: dw 0 ; count of messages received
+                            ;   tocnt:   dw 0 ; count of timed-out messages
+                            ;   chkcnt:  dw 0 ; count of messages with bad checksum
 n?init      equ 44h         ; initialize the network stack, HL=A=0(success)/FF(timeout)
 
 
@@ -58,16 +63,17 @@ NDOSKILL    equ 21          ; Unload NDOS & restore vectors
 ;
 ;  CMD codes are:
 ;
-NFNDFST     equ 02h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NFNDNXT     equ 04h         ; DATA is |FCBlo|FCBhi|
-NOPENF      equ 06h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NCLOSEF     equ 08h         ; DATA is |FCBlo|FCBhi|
-NDELETF     equ 0Ah         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
-NREADF      equ 0Ch         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|
-NWRITEF     equ 0Eh         ; DATA is |FCBlo|FCBhi|Reclo|Rechi|Datax128|
-NCREATF     equ 10h         ; DATA is |FCBlo|FCBhi|NAMEx8|EXTx3|
+NFNDFST     equ 02h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NFNDNXT     equ 04h         ; DATA is |FD|-FD|
+NOPENF      equ 06h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NCLOSEF     equ 08h         ; DATA is |FD|-FD|
+NDELETF     equ 0Ah         ; DATA is |FD|-FD|NAMEx8|EXTx3|
+NREADF      equ 0Ch         ; DATA is |FD|-FD|Reclo|Rechi|
+NWRITEF     equ 0Eh         ; DATA is |FD|-FD|Reclo|Rechi|Datax128|
+NCREATF     equ 10h         ; DATA is |FD|-FD|NAMEx8|EXTx3|
 NRENAMF     equ 12h         ; DATA is |NAMEx8|EXTx3|NAMEx8|EXTx3|
 NCHDIR      equ 20h         ; DATA is |Pathv128|
 NMKDIR      equ 22h         ; DATA is |Pathv128|
 NRMDIR      equ 24h         ; DATA is |Pathv128|
 NECHO       equ 30h         ; DATA is |Datav128|
+NSHELL      equ 32h         ; DATA is |Type|Datav128|

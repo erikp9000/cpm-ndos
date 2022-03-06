@@ -2,9 +2,9 @@
 ;;
 ;; ALTRNIOS.ASM   [Altair 8800 w/88-2SIO serial port]
 ;;
-;; To build ALTRNIOS.SPR:
-;;   RMAC ALTRNIOS $PZ SZ
-;;   LINK ALTRNIOS[OS]
+;; To build NIOSALTR.SPR:
+;;   RMAC NIOSALTR $PZ SZ
+;;   LINK NIOSALTR[OS]
 ;;
 ;; The Altair 8800 NIOS uses the second serial port on the 
 ;; 88-2SIO to communicate with the file server. The baud

@@ -803,7 +803,7 @@ setupbuf:
 	sta sbuf
 	mov a,c		; network command
 	sta sbuf+1
-	mov a,e		; FCB address serves as handle
+	mov a,e		; FCB address serves as handle (ignored in v1.2 and later)
 	sta sbuf+2
 	mov a,d
 	sta sbuf+3
@@ -902,7 +902,7 @@ srchn1:
 
 	mvi b,10h	; message length
 	mvi c,NFNDNXT	; network command
-	; de already contains FCB address (which we use as a file handle)
+	; de already contains FCB address
 	
 	call setupbuf
 
@@ -930,7 +930,7 @@ openfv:
 
 	mvi b,10h	; message length
 	mvi c,NOPENF	; network command
-	; de contains FCB address (which we use as a file handle)
+	; de contains FCB address
 
 xcvwithfn:
 	call setupbuf	; setup sbuf header
@@ -945,8 +945,8 @@ xcvnofn:
 	lda rbuf+4	; status
 	sta status
         
-        lhld params     ; get uses's FCB
-        lxi d,FCB?AV   ; point to disk allocation vector
+        lhld params     ; get user's FCB
+        lxi d,FCB?AV    ; point to disk allocation vector
         dad d
         lda rbuf+2      ; get file handle from server
         mov m,a         ; write to user's FCB
@@ -1004,7 +1004,7 @@ closefv:
 
 	mvi b,5		; message length
 	mvi c,NCLOSEF	; network command
-	; de contains FCB address (which we use as a file handle)
+	; de contains FCB address
 	lxi h,FCB?AV
 	dad d
 	mov e,m
@@ -1133,7 +1133,7 @@ renamfv:
 
 	mvi b,27	; message length
 	mvi c,NRENAMF	; network command
-	; de contains FCB address (which we use as a file handle)
+	; de contains FCB address
         lxi d,0
 
 	call setupbuf	; setup sbuf header
@@ -1240,25 +1240,25 @@ wrtrfv:
 
 
 	; Panic exit
-panic:	call isnetdsk	; doesn't return if not network disk
+panic:	call    isnetdsk	; doesn't return if not network disk
 
-	mov a,c		; convert function code to hexadecimal
+	mov     a,c		; convert function code to hexadecimal
 	rrc
 	rrc
 	rrc
 	rrc
-	call getHexChar
-	sta panicarg
-	mov a,c
-	call getHexChar
-	sta panicarg+1	
-	mvi c,prnstr
-	lxi d,panicmsg
-	call 5
+	call    getHexChar
+	sta     panicarg
+	mov     a,c
+	call    getHexChar
+	sta     panicarg+1	
+	mvi     c,prnstr
+	lxi     d,panicmsg
+	call    bdosv
 
 	; We are aborting the program because it's trying to do
 	; something we don't support.
-	jmp warm	; reload CCP.COM
+	jmp     warm            ; reload CCP.COM
 
 lastaddr:
 

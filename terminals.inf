@@ -1,0 +1,69 @@
+# Load these terminals into terminfo db:
+# $ tic terminals.inf
+
+# The Kaypro doesn't have hardware tab stops. We also must
+# disable xon/xoff because the right cursor key is ^S!
+# $ stty -tabs -ixon
+#
+# man/groff/troff outputs ANSI color sequences which confuse
+# confuse the video driver. more doesn't output color.
+# $ export PAGER=more
+
+# Basic kaypro terminal doesn't have underline or reverse video.
+
+kaypro|kaypro2|kaypro II,
+        OTbs, am, 
+        ed=^W, el=^X, 
+        dl1=\ER, il1=\EE,
+        use=adm3a,
+        
+# Kaypro 2X/4X/10 terminal has underline and reverse video
+# which works great with man pages using the more pager.
+
+kaypro2x|kaypro4x|kaypro10|Kaypro 2X/4X/10 CP/M 2.2,
+        rev=\EB0, dim=\EB1, blink=\EB2, smul=\EB3,
+        rmul=\EC3, bold=\EB0, smso=\EB0, rmso=\EC0,
+        sgr0=\EC0\EC1\EC2\EC3\EB4\EC5,
+        sc=\EB6, rc=\EC6,
+        civis=\EC4, cnorm=\EB4,
+        kcub1=^S, kcuf1=^D, kcuu1=^E, kcud1=^X,
+        use=kaypro,
+        
+
+# man/groff/troff outputs ANSI color sequences which confuse
+# the video driver. more doesn't output color.
+# $ export PAGER=more
+
+trs4|Radio Shack Model 4/4P/4D Montezuma 2.32 CP/M 2.2,
+        el=^U, ed=^Y, it#8,
+        smso=^O, rmso=^N, sgr0=^N, 
+        bold=^O, rev=^O,
+        dl1=^], il1=^\,
+        civis=\E0, cnorm=\E1,
+        ht=^I, kcuf1=^I, use=adm3a,
+        
+adm3|lsi adm3,
+        OTbs, am,
+        cols#80, lines#24,
+        bel=^G, clear=^Z, cr=\r, cub1=^H, cud1=\n, ind=\n,
+# The following ADM-3A switch settings are assumed for normal operation:
+#       SPACE           U/L_DISP        CLR_SCRN        24_LINE
+#       CUR_CTL         LC_EN           AUTO_NL         FDX
+# Other switches may be set for operator convenience or communication
+# requirements.  I recommend
+#       DISABLE_KB_LOCK LOCAL_OFF       103             202_OFF
+#       ETX_OFF         EOT_OFF
+# Most of these terminals required an option ROM to support lower case display.
+# Open the case and look at the motherboard; if you see an open 24-pin DIP
+# socket, you may be out of luck.
+#
+# (adm3a: some capabilities merged in from BRl entry -- esr)
+adm3a|lsi adm3a,
+        OTbs, am,
+        cols#80, lines#24,
+        OTma=^K^P, OTnl=\n, bel=^G, clear=^Z$<1/>, cr=\r, cub1=^H,
+        cud1=\n, cuf1=^L, cup=\E=%p1%{32}%+%c%p2%{32}%+%c,
+        cuu1=^K, home=^^, ind=\n, kcub1=^H, kcud1=\n, kcuf1=^L,
+        kcuu1=^K, rs2=^N, kbs=^H, 
+adm3a+|adm3a plus,
+        kbs=^H, use=adm3a,

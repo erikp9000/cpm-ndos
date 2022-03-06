@@ -2,10 +2,14 @@ rmac ndos $$pz sz
 link ndos[os]
 rmac nios $$pz sz
 link nios[os]
-rmac altrnios $$pz sz
-link altrnios[os]
-rmac kp2-nios $$pz sz
-link kp2-nios[os]
+rmac niosaltr $$pz sz
+link niosaltr[os]
+rmac nios-kp2 $$pz sz
+link nios-kp2[os]
+rmac nios-t80 $$pz sz
+link nios-t80[os]
+era *.rel
+era *.sym
 mac ldndos $$pz sz
 load ldndos
 mac cd $$pz sz
@@ -18,3 +22,6 @@ mac necho $$pz sz
 load necho
 mac nstat $$pz sz
 load nstat
+mac nsh $$pz sz
+load nsh
+era *.hex
