@@ -909,15 +909,21 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
 //
 msgbuf_t client_t::delete_file(const msgbuf_t& msg)
 {
+    int retval = -1;
     msgbuf_t resp = find_first(msg);
 
-    printf("delete_file '%s' ", m_local_filename.c_str());
-
     resp.resize(4);  // discard short filename and file size
-
-    int retval = -1;
-    if(0 == resp[3]) // on success, try to delete local filename
+   
+    while(0 == resp[3]) // on success, try to delete local filename
+    {
+        printf("delete_file '%s' ", m_local_filename.c_str());
         retval = unlink(m_local_filename.c_str());
+        
+        if(-1 == retval) break; // quit on an error
+        
+        printf("success\n");
+        resp = find_next(msg);
+    }
 
     if(-1 == retval)
     {
@@ -927,7 +933,6 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
     }
     else
     {
-        printf("success\n");
         resp[3] = 0; // success
     }
 
