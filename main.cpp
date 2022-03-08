@@ -13,10 +13,12 @@
 #include <netinet/in.h>
 #include <netinet/ip.h> /* superset of previous */
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
 
 #include <sys/select.h>
 #include <sys/wait.h>
-
+       
 #include <map>
 #include <string>
 #include <vector>
@@ -46,20 +48,27 @@ extern speed_t string_to_speed (const string& str);
 extern unsigned long int speed_to_baud (const speed_t& speed);
 extern speed_t baud_to_speed (const int& baud);
 
-// client receive buffer object
-// struct client_buf_t {
-    // client_buf_t() {
-        // offset  = 0;
-        // cnt = 1;
-    // }
-    // unsigned char buffer[512];
-    // int offset;
-    // int cnt;
-// };
+int listen_fd = -1;
 
-// map of file descriptors to client bufs
-//typedef std::map<int, client_buf_t> client_buf_map_t;
-//client_buf_map_t client_bufs;
+
+void quit(int i)
+{
+    printf("Quitting...\n");
+    
+    if(listen_fd != -1)
+    {
+        close(listen_fd);
+        listen_fd = -1;
+    }
+    
+    // iterate clients and close open fds
+    for(client_map_t::iterator it = client_map.begin() ;
+        it != client_map.end() ;
+        ++it)
+    {
+        it->second.close_fds();
+    }
+}
 
 int set_interface_attribs(int fd, int baud)
 {
@@ -153,7 +162,6 @@ void read_config()
 		Value& path = config["path"];
 		// print search path
 		printf("search path is:\n");
-
 		for (SizeType i = 0; i < path.Size(); i++)
 		{
 			printf("    %s\n", path[i].GetString());
@@ -166,8 +174,9 @@ void read_config()
 		{
 			string port = serial_ports[i]["port"].GetString();
 			int baud = serial_ports[i]["baud"].GetInt();
+            string term = serial_ports[i].HasMember("term") ? serial_ports[i]["term"].GetString() : "";
             
-			printf("port=%s baud=%d\n", port.c_str(), baud);
+			printf("port=%s baud=%d term=%s\n", port.c_str(), baud, term.c_str());
 			
             int fd = -1;
             if(baud)
@@ -189,8 +198,25 @@ void read_config()
             
             // add port to client map
             client_t & client = client_map[port];			
-			client.init(fd, port, root_path);
+			client.init(fd, port, root_path, term);
 		}
+
+		// process clients
+        if(config.HasMember("clients"))
+        {
+            Value& clients = config["clients"];
+            for (SizeType i = 0; i < clients.Size(); i++)
+            {
+                string name = clients[i]["name"].GetString();
+                string term = clients[i]["term"].GetString();
+                
+                printf("name=%s term=%s\n", name.c_str(), term.c_str());
+                
+                // add port to client map
+                client_t & client = client_map[name];
+                client.init(-1/*fd*/, name, root_path, term);
+            }
+        }
 	}
 	else
 	{
@@ -199,9 +225,34 @@ void read_config()
 	}
 }
 
+// This way of detecting a dead connection seems to work...
+// TCP really wants an application-layer keepalive to detect dead connections.
+// The USR-TCP232-302 does support a heartbeat packet which is sent at the
+// application layer and might work better.
+void enable_keepalive(int sock) 
+{
+    int yes = 1; // enable keepalive probes
+    setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(int));
+
+    int idle = 1; // how long connection remains idle before sending keepalive probes
+    setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(int));
+
+    int interval = 5; // seconds between keepalive probes
+    setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(int));
+
+    int maxpkt = 3; // max keepalive probes to send before dropping connection
+    setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &maxpkt, sizeof(int));
+
+    int usertimeout = idle + interval * maxpkt;
+    setsockopt(sock, IPPROTO_TCP,  TCP_USER_TIMEOUT, &usertimeout, sizeof(int));
+}
+
 int main()
 {
+    signal(SIGINT, quit); // close sockets on SIGINT
+    
     read_config();
+    fflush(stdout);
 
 	// The socket server supports USR-TCP232-302 Serial to Ethernet converter
 	
@@ -213,7 +264,7 @@ int main()
     my_addr.sin_port = htons(8234);
     my_addr.sin_addr.s_addr = INADDR_ANY;
 
-    int listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0/*protocol*/);
+    listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0/*protocol*/);
 
     if (-1 == listen_fd)
     {
@@ -251,12 +302,14 @@ int main()
 			it->second.add_fds(readfds, max_fds);
         }
 
+        // set select() timeout to 20 seconds
         timeout.tv_sec = 20;
         timeout.tv_usec = 0;
 
-//printf("select() entered\n");
-        rv = select(max_fds + 1, &readfds, NULL, NULL, &timeout);
-//printf("select() returned (%d)\n", rv);
+        //printf("select() entered\n");
+        rv = select(max_fds + 1, &readfds, NULL/*writefds*/, NULL/*exceptfds*/, &timeout);
+        //printf("select() returned (%d)\n", rv);
+
         if(rv == -1)
         {
             perror("select");
@@ -277,22 +330,31 @@ int main()
             int flags = fcntl(fd, F_GETFL, NULL);
             fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
+            // enable kernel TCP keepalives on this socket so we can detect client disconnect
+            enable_keepalive(fd);
+            
             // get client IP address
-            char *client_name = inet_ntoa(peer_addr.sin_addr);
-            printf("Got connection, IP address (%d): %s\n", fd, client_name);
+            char *ip_addr = inet_ntoa(peer_addr.sin_addr);
+            
+            // get client hostname and service port (if possible)
+            char client_name[NI_MAXHOST], client_port[NI_MAXSERV];
+            getnameinfo(
+                (struct sockaddr *) &peer_addr, peer_addr_size,
+                client_name, sizeof(client_name),
+                client_port, sizeof(client_port), 0/*flags*/);
+                
+            printf("Got connection (%d), client: %s (%s:%s)\n", fd, client_name, ip_addr, client_port);
+            fflush(stdout);
 
             // lookup peer_addr in map, add it if not found
             client_t & client = client_map[client_name];
 
-            // A stale file descriptor can happen when the serial-to-
-            // ethernet translator is unplugged because Linux doesn't
-            // generate any signal when the other side of a TCP socket
-            // disappears without a proper close socket negotiation.
-            // Yep. Tried passing exception fds to select().
+            // Check for a stale client. 
+            // Should not happen since we have TCP KeepAlives enabled.
             if((client != -1) && (fd != client))
                 close(client);
 
-            client.init(fd, client_name, root_path);
+            client.init(fd, client_name, root_path, ""/*term*/);
         }
         else // determine which client & process received data
         {
@@ -300,12 +362,10 @@ int main()
                 it != client_map.end() ;
                 ++it)
             {
-				// stop polling on the first client to accept the input
-				if(it->second.check_fds(readfds))
-					break;
+                // let client check for received data
+                it->second.check_fds(readfds);
             }
         }
-    } while(1);
-
+    } while(1);    
 }
 

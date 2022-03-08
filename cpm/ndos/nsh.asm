@@ -32,13 +32,13 @@ start:	lxi     h,0
         
         ; The Kaypro BIOS won't disable the drive motor unless we
         ; make a blocking call for console input.
-        call dousage
-        lxi h,retn              ; return from BIOS
-        push h                  ; push return addr on stack
-        lhld 1                  ; BIOS WBOOT
-        lxi d,2*3
-        dad d                   ; BIOS CONIN        
-        pchl
+        ;;call dousage
+        ;;lxi h,retn              ; return from BIOS
+        ;;push h                  ; push return addr on stack
+        ;;lhld 1                  ; BIOS WBOOT
+        ;;lxi d,2*3
+        ;;dad d                   ; BIOS CONIN        
+        ;;pchl
 
 	; copy command line args from dmabuf
 retn:   lxi d,msgbuf+3	; point to start of data

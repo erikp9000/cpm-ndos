@@ -1,0 +1,13 @@
+[Unit]
+Description=CPM-NDOS-Server
+
+[Service]
+Type=simple
+User=pi
+Group=users
+WorkingDirectory=/share/cpm-ndos
+ExecStart=/share/cpm-ndos/ndos-srv
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target

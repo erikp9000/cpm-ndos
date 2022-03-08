@@ -32,23 +32,26 @@ client_t::client_t()
 
     m_dir = NULL;
     m_de = NULL;
-    
-    m_term = "dumb";
-    
-    init(-1/*fd*/, ""/*name*/, "."/*root*/);
+        
+    init(-1/*fd*/, ""/*name*/, "."/*root*/, "dumb"/*term*/);
 }
 
 client_t::~client_t()
 {
+    close_fds();
+}
+
+void client_t::close_fds(void)
+{
     if(-1 != m_fd)
     {
-       //printf("client_t close '%s'\n", name().c_str());
+       //printf("client_t close '%s' m_fd=%d\n", name().c_str(), m_fd);
        close(m_fd);
        m_fd = -1;
     }
     if(-1 != m_fd_pty)
     {
-       //printf("client_t close m_fd_pty=%d\n", m_fd_pty);
+       //printf("client_t close shell m_fd_pty=%d\n", m_fd_pty);
        close(m_fd_pty);
        m_fd_pty = -1;
     }
@@ -57,18 +60,19 @@ client_t::~client_t()
     m_fcbs.clear();
 }
 
-void client_t::init(int fd, string name, string root) 
+void client_t::init(int fd, string name, string root, string term) 
 {
     m_fd = fd;
     if(name.length()) m_name = name;
     if(m_cwd == ".") m_cwd = root;
+    if(term.length()) m_term = term;
     
     m_offset = 0;
     m_cnt = 1;
 }
 
     
-// Set any of my file descriptors in readfds.
+// Set my active file descriptors in readfds.
 void client_t::add_fds(fd_set& readfds, int& max_fds)
 {
 	// This is the primary client file descriptor
@@ -99,6 +103,7 @@ bool client_t::check_fds(fd_set& readfds)
 	{
         retval = true;
 		recv_request();
+        fflush(stdout);
 	}
 	
     if(FD_ISSET(m_fd_pty, &readfds)) // output from shell command
@@ -117,6 +122,7 @@ bool client_t::check_fds(fd_set& readfds)
             close(m_fd_pty);
             m_fd_pty = -1;
         }
+        fflush(stdout);
 	}
 		
 	return retval;
@@ -150,7 +156,7 @@ void client_t::recv_request()
             }
 
             // Print error and close the socket
-            perror("read error");
+            printf("recv_request (%d) read error: %s\n", m_fd, strerror(errno));
             close(m_fd);
             m_fd = -1;
             return;
@@ -159,7 +165,7 @@ void client_t::recv_request()
         {
             // reset buf for next message (serial)
             // if no characters, this isn't a timeout
-            if(m_offset) printf("read timeout m_offset=%d m_cnt=%d\n", m_offset, m_cnt);
+            if(m_offset) printf("recv_request (%d) read timeout m_offset=%d m_cnt=%d\n", m_fd, m_offset, m_cnt);
             m_offset = 0;
             m_cnt = 1;
             return;
@@ -205,7 +211,7 @@ void client_t::recv_request()
                 }
                 else
                 {
-                    printf("checksum failure\n");
+                    printf("recv_request (%d) checksum failure\n", m_fd);
                     for(int i=0 ; i < m_cnt ; ++i)
                     {
                         printf("%02x ", m_buffer[i]);
@@ -1276,11 +1282,8 @@ bool client_t::launch_shell_command(const string& commandline)
             args = args.substr(offset_to_space + 1);
         }
     }
-    //printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
     while(' ' == args[0]) args.erase(0, 1);
     
-    printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
-
     // forkpty() calls posix_openpt() to get a pseudo-tty, 
     // forks the process, opens the slave-side of the pty
     // in the child process, and assigns stdin/stdout/stderr
@@ -1292,21 +1295,14 @@ bool client_t::launch_shell_command(const string& commandline)
         NULL, //&tty,
         NULL); // struct winsize
 
-	if( m_child_pid < 0 )
+	if( m_child_pid < 0 ) // Something went wrong...
 	{
         printf("launch_shell_command: failed to fork\n");
         send_stdout("\r\nFork() remote shell command failed.\r\n");
 		return false;
 	}
-	else if( m_child_pid == 0 ) 
+	else if( m_child_pid == 0 ) // I'm the child
 	{
-		//printf("I'm the child\n");
-        
-        // Send to remote client
-        printf("\nYou are connected from: %s\n", m_name.c_str());
-        printf("Your terminal is: %s (%s)\n", ttyname.c_str(), m_term.c_str());
-        printf("To change terminal type, use: nsh /terminal args\n\n");
-        
         // set terminal from config file or "dumb" 
         setenv("TERM", m_term.c_str(), 1/*overwrite*/);
 
@@ -1315,16 +1311,27 @@ bool client_t::launch_shell_command(const string& commandline)
         // we basically just did 'delete this' so don't try
         // to access member variables or methods after here
         
-		// launch shell command
         if(args.length())
+        {
+            // launch shell command
             execlp("bash", "bash", "-c", args.c_str(), NULL);
+        }
         else
+        {
+            // remote client welcome
+            printf("\nYou are connected from: %s\n", m_name.c_str());
+            printf("Your terminal is: %s (%s)\n", ttyname.c_str(), m_term.c_str());
+            printf("To change terminal type, use: nsh /terminal args\n\n");
+            fflush(stdout);
+            
+            // launch the shell
             execlp("bash", "-bash", NULL);
+        }
 	}
-	else
+	else // I'm the parent
 	{
-		//printf("I'm the parent\n");        
 		printf("My child process is %d fd=%d\n", m_child_pid, m_fd_pty);
+        printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
 	}
     
 	return true;

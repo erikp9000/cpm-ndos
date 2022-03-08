@@ -4,11 +4,19 @@
   "path": [
     "/ndos",
     "/bin",
-	"/dri",
-	"/microsoft",
-	"/bdsc/bdsc160"
+    "/dri",
+    "/microsoft",
+    "/bdsc/bdsc160"
   ],
+  
   "serial": [
     { "port": "/dev/ttyUSB0", "baud": 9600 }
+  ],
+  
+  "clients": [
+    { "name": "TRS80", "term": "trs4" },
+    { "name": "KAYPRO2", "term": "kaypro2" },
+    { "name": "ALTAIR", "term" : "ansi" }
   ]
+
 }

@@ -105,7 +105,7 @@ public:
 
 	void recv_request();
 
-    void init(int fd, string name, string root);
+    void init(int fd, string name, string root, string term);
 
     string name() { return m_name; }
 	
@@ -113,6 +113,8 @@ public:
 
     void add_fds(fd_set& readfds, int& max_fds);
 	bool check_fds(fd_set& readfds);
+    
+    void close_fds();
 
 protected:
 	void send_resp(const msgbuf_t &resp);
@@ -154,7 +156,7 @@ private:
 #endif
 
     int m_fd;                       // I/O file descriptor for receiving & sending messages
-    string m_name;                  // IP address of the client or serial port device name
+    string m_name;                  // Hostname/IP address of the client OR serial port device name
 	
 	// receive buffer
 	unsigned char m_buffer[512];

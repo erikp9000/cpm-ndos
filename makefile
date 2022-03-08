@@ -22,3 +22,11 @@ $(PROGNAME): $(obj)
 clean:
 	rm -f $(obj) $(PROGNAME) $(dep)
 
+install:
+	systemctl stop cpm-ndos
+	systemctl disable cpm-ndos
+	cp cpm-ndos.service /etc/systemd/system
+	systemctl enable cpm-ndos
+	systemctl start cpm-ndos
+        
+        
