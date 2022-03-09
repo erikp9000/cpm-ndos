@@ -15,12 +15,16 @@
 #include <pty.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <utmp.h>
+#include <pwd.h>
 
 #undef DEBUG
 
 const int MAX_FILENAME_LEN = 11;
 const time_t FILE_TIMEOUT = 5*60;
 
+extern uid_t nsh_uid;
+extern uid_t file_uid;
 
 client_t::client_t()
 {
@@ -157,8 +161,7 @@ void client_t::recv_request()
 
             // Print error and close the socket
             printf("recv_request (%d) read error: %s\n", m_fd, strerror(errno));
-            close(m_fd);
-            m_fd = -1;
+            close_fds();
             return;
         }
         else if(rdlen == 0)
@@ -874,7 +877,7 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
    
     // creat() opens the file with O_WRONLY which breaks Random File Access!
     hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
-        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
     printf("create_file(%d) '%s' fcb_addr=0x%04X ", hdl, filename.c_str(), fcb_addr);
 
@@ -1254,6 +1257,7 @@ msgbuf_t client_t::shell(const msgbuf_t& msg)
                 close (m_fd_pty);
                 m_fd_pty = -1;
             }
+            remove_utmp();
         }
     }
     
@@ -1288,10 +1292,13 @@ bool client_t::launch_shell_command(const string& commandline)
     // forks the process, opens the slave-side of the pty
     // in the child process, and assigns stdin/stdout/stderr
     // to the slave-side of the pty.
-    string ttyname(256, '\0');    
+    m_ttyname.resize(256, '\0');
+    
+    seteuid(0); // effective uid=root so forkpty() works
+    
     m_child_pid = forkpty(
         &m_fd_pty, 
-        (char*)ttyname.data(),
+        (char*)m_ttyname.data(),
         NULL, //&tty,
         NULL); // struct winsize
 
@@ -1303,6 +1310,8 @@ bool client_t::launch_shell_command(const string& commandline)
 	}
 	else if( m_child_pid == 0 ) // I'm the child
 	{
+        setuid(nsh_uid); // permanent switch to user uid
+        
         // set terminal from config file or "dumb" 
         setenv("TERM", m_term.c_str(), 1/*overwrite*/);
 
@@ -1320,7 +1329,7 @@ bool client_t::launch_shell_command(const string& commandline)
         {
             // remote client welcome
             printf("\nYou are connected from: %s\n", m_name.c_str());
-            printf("Your terminal is: %s (%s)\n", ttyname.c_str(), m_term.c_str());
+            printf("Your terminal is: %s (%s)\n", m_ttyname.c_str(), m_term.c_str());
             printf("To change terminal type, use: nsh /terminal args\n\n");
             fflush(stdout);
             
@@ -1330,8 +1339,11 @@ bool client_t::launch_shell_command(const string& commandline)
 	}
 	else // I'm the parent
 	{
+        seteuid(file_uid); // back to user uid for safety
+        
 		printf("My child process is %d fd=%d\n", m_child_pid, m_fd_pty);
         printf("launch_shell_command: '%s' term='%s'\n", args.c_str(), m_term.c_str());
+        add_utmp();
 	}
     
 	return true;
@@ -1387,3 +1399,49 @@ string client_t::get_stdout()
     return retval;
 }
 
+
+void client_t::add_utmp(void)
+{
+    uid_t uid = geteuid();
+    
+    // become root to edit UTMP file
+    seteuid(0); // effective uid=root
+    
+    struct utmp entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.ut_type = USER_PROCESS;
+    entry.ut_pid = m_child_pid;
+    strcpy(entry.ut_line, m_ttyname.c_str() + strlen("/dev/"));
+    strcpy(entry.ut_id, m_ttyname.c_str() + m_ttyname.size() - 4);
+    time(&entry.ut_time);
+    strcpy(entry.ut_user, getpwuid(nsh_uid)->pw_name);
+    strcpy(entry.ut_host, m_name.c_str());
+    entry.ut_addr = 0;
+    setutent();
+    void * ret = pututline(&entry);
+    printf("add_utmp(), retval=%s\n", ret==NULL ? "failed" : "success");
+    
+    // switch back to file user
+    seteuid(uid);
+}
+
+void client_t::remove_utmp(void)
+{
+    uid_t uid = geteuid();
+    
+    // become root to edit UTMP file
+    seteuid(0); // effective uid=root
+    
+    struct utmp entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.ut_type = DEAD_PROCESS;
+    entry.ut_pid = m_child_pid;
+    strcpy(entry.ut_id, m_ttyname.c_str() + m_ttyname.size() - 4);
+    setutent();
+    void * ret = pututline(&entry);
+    endutent();
+    printf("remove_utmp(), retval=%s\n", ret==NULL ? "failed" : "success");
+    
+    // switch back to file user
+    seteuid(uid);
+}

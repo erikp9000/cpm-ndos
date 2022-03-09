@@ -5,19 +5,21 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
-
-#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
 #include <dirent.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+
 #include <netinet/in.h>
 #include <netinet/ip.h> /* superset of previous */
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
-
-#include <sys/select.h>
-#include <sys/wait.h>
        
 #include <map>
 #include <string>
@@ -49,6 +51,10 @@ extern unsigned long int speed_to_baud (const speed_t& speed);
 extern speed_t baud_to_speed (const int& baud);
 
 int listen_fd = -1;
+
+uid_t nsh_uid;
+uid_t file_uid;
+gid_t file_gid;
 
 
 void quit(int i)
@@ -217,6 +223,25 @@ void read_config()
                 client.init(-1/*fd*/, name, root_path, term);
             }
         }
+        
+        file_uid = nsh_uid = getuid();
+        
+        if(config.HasMember("fileuser"))
+        {
+            file_uid = getpwnam(config["fileuser"].GetString())->pw_uid;
+        }
+
+        if(config.HasMember("shelluser"))
+        {
+            nsh_uid = getpwnam(config["shelluser"].GetString())->pw_uid;
+        }
+        
+        file_gid = getgid();
+        if(config.HasMember("filegroup"))
+        {
+            file_gid = getgrnam(config["filegroup"].GetString())->gr_gid;
+            printf("filegroup %s = %d\n", config["filegroup"].GetString(), file_gid);
+        }
 	}
 	else
 	{
@@ -247,13 +272,20 @@ void enable_keepalive(int sock)
     setsockopt(sock, IPPROTO_TCP,  TCP_USER_TIMEOUT, &usertimeout, sizeof(int));
 }
 
+
 int main()
 {
     signal(SIGINT, quit); // close sockets on SIGINT
     
     read_config();
-    fflush(stdout);
+    fflush(stdout); // when running as a service, pipes buffer the output
+                    // and the log is updated in bursts with long intervals
 
+    // Get uids for specific tasks
+    setgid(file_gid);
+    seteuid(file_uid); // switch to file uid for safety
+    umask(0);  // no mask on create file permissions
+    
 	// The socket server supports USR-TCP232-302 Serial to Ethernet converter
 	
     struct sockaddr_in my_addr, peer_addr;

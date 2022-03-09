@@ -147,7 +147,9 @@ protected:
 private:
     void reset_dir();
     int get_file_handle(const msgbuf_t& msg);
-
+    void add_utmp(void);
+    void remove_utmp(void);
+    
 private:
     string m_cwd;                   // current working directory
     fcb_map_t m_fcbs;               // file control block map, hdl -> fcb_map_t
@@ -157,6 +159,7 @@ private:
 
     int m_fd;                       // I/O file descriptor for receiving & sending messages
     string m_name;                  // Hostname/IP address of the client OR serial port device name
+    string m_ttyname;               // ttyname for shell()
 	
 	// receive buffer
 	unsigned char m_buffer[512];

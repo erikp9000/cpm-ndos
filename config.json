@@ -17,6 +17,9 @@
     { "name": "TRS80", "term": "trs4" },
     { "name": "KAYPRO2", "term": "kaypro2" },
     { "name": "ALTAIR", "term" : "ansi" }
-  ]
+  ],
 
+  "fileuser": "nobody",
+  "filegroup": "nogroup",
+  "shelluser": "pi"
 }
