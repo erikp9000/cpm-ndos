@@ -23,13 +23,11 @@
 const int MAX_FILENAME_LEN = 11;
 const time_t FILE_TIMEOUT = 5*60;
 
-extern uid_t nsh_uid;
-extern uid_t file_uid;
 
 client_t::client_t()
 {
     m_fd = -1;
-    m_cwd = ".";
+    m_cwd = "";
 
     m_child_pid = -1;
     m_fd_pty = -1;
@@ -37,7 +35,7 @@ client_t::client_t()
     m_dir = NULL;
     m_de = NULL;
         
-    init(-1/*fd*/, ""/*name*/, "."/*root*/, "dumb"/*term*/);
+    init(-1/*fd*/, ""/*name*/, ""/*home_dir*/, "dumb"/*term*/);
 }
 
 client_t::~client_t()
@@ -64,11 +62,17 @@ void client_t::close_fds(void)
     m_fcbs.clear();
 }
 
-void client_t::init(int fd, string name, string root, string term) 
+void client_t::init(int fd, string name, string home_dir, string term) 
 {
+    printf("client_t::init(%p) %d, %s, %s, %s\n", this, fd, name.c_str(), home_dir.c_str(), term.c_str());
+    
     m_fd = fd;
     if(name.length()) m_name = name;
-    if(m_cwd == ".") m_cwd = root;
+    if(!m_cwd.length()) m_cwd = root_path;
+    if(home_dir.length()) {
+        m_cwd = m_cwd + "/" + home_dir;
+        printf("%s home directory is: %s\n", name.c_str(), m_cwd.c_str());
+    }
     if(term.length()) m_term = term;
     
     m_offset = 0;
@@ -1007,6 +1011,7 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 //    printf("\n");
 
     resp[0] = resp[0] + 1; // response code
+    resp[1] = 0xff; // prepare for failure
 
     string new_dir((char*)&msg[1], msg.size() - 1);
     while(new_dir[0] == ' ')
@@ -1014,28 +1019,27 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 
     // convert to lower-case because CPM converts to upper-case
     for(size_t i=0 ; i<new_dir.length() ; ++i)
-	new_dir[i] = tolower(new_dir[i]);
+        new_dir[i] = tolower(new_dir[i]);
 
-    // detect change to root and add root_path
-    if(new_dir[0] == '/')
-	new_dir = root_path + new_dir;
+    if(new_dir[0] == '/') new_dir = root_path + new_dir;
+    else new_dir = m_cwd + "/" + new_dir;
 
     printf("change_dir new_dir='%s'\n", new_dir.c_str());
 
-    if(new_dir.length())
-        resp[1] = chdir(new_dir.c_str());
-
-    // remember client's new current working directory
-    char *d = get_current_dir_name();
-    m_cwd = d;
-    free(d);
-
-    // is this directory under the root_path?
-    if(strncmp(root_path.c_str(), m_cwd.c_str(), root_path.length()))
+    // try to open the directory
+    char* path = realpath(new_dir.c_str(), NULL);
+    if(path)
     {
-        // nope. go back to original current working directory
-	m_cwd = old_path;
-        chdir(m_cwd.c_str());
+        // is this directory under the root_path?
+        if((strlen(path) >= root_path.length()) &&
+           (0==strncmp(path, root_path.c_str(), root_path.length()))
+          )
+        {
+            // yep. select the new path.
+            m_cwd = path;
+            resp[1] = 0; // success
+        }
+        free(path);
     }
 
     // copy new directory into response
@@ -1315,6 +1319,9 @@ bool client_t::launch_shell_command(const string& commandline)
         // set terminal from config file or "dumb" 
         setenv("TERM", m_term.c_str(), 1/*overwrite*/);
 
+        // switch to user's current directory
+        chdir(m_cwd.c_str());
+        
         // close all client connections and all files
         client_map.clear();        
         // we basically just did 'delete this' so don't try

@@ -20,6 +20,9 @@ typedef vector<uint8_t> msgbuf_t;
 
 extern vector<string> search_path;
 extern string root_path;
+extern uid_t nsh_uid;
+extern uid_t file_uid;
+
 
 #define CMD_FINDFIRST  0x02
 #define CMD_FINDNEXT   0x04
@@ -105,7 +108,7 @@ public:
 
 	void recv_request();
 
-    void init(int fd, string name, string root, string term);
+    void init(int fd, string name, string home_dir, string term);
 
     string name() { return m_name; }
 	

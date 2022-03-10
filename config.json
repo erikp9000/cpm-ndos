@@ -1,6 +1,9 @@
 {
   "root": "cpm",
- 
+  "fileuser": "nobody",
+  "filegroup": "nogroup",
+  "shelluser": "pi",
+
   "path": [
     "/ndos",
     "/bin",
@@ -14,12 +17,9 @@
   ],
   
   "clients": [
-    { "name": "TRS80", "term": "trs4" },
-    { "name": "KAYPRO2", "term": "kaypro2" },
-    { "name": "ALTAIR", "term" : "ansi" }
-  ],
-
-  "fileuser": "nobody",
-  "filegroup": "nogroup",
-  "shelluser": "pi"
+    { "name": "ALTAIR", "term" : "ansi" },
+    { "name": "KAYPRO2", "term": "kaypro2", "home": "kaypro" },
+    { "name": "TRS80", "term": "trs4", "home": "trs80" },
+    { "name": "OTRONA", "term": "", "home": "otrona" }
+  ]
 }

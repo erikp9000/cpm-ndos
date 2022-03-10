@@ -181,8 +181,9 @@ void read_config()
 			string port = serial_ports[i]["port"].GetString();
 			int baud = serial_ports[i]["baud"].GetInt();
             string term = serial_ports[i].HasMember("term") ? serial_ports[i]["term"].GetString() : "";
+            string home = serial_ports[i].HasMember("home") ? serial_ports[i]["home"].GetString() : "";
             
-			printf("port=%s baud=%d term=%s\n", port.c_str(), baud, term.c_str());
+			printf("port=%s baud=%d term=%s home=%s\n", port.c_str(), baud, term.c_str(), home.c_str());
 			
             int fd = -1;
             if(baud)
@@ -204,7 +205,7 @@ void read_config()
             
             // add port to client map
             client_t & client = client_map[port];			
-			client.init(fd, port, root_path, term);
+			client.init(fd, port, home, term);
 		}
 
 		// process clients
@@ -214,13 +215,14 @@ void read_config()
             for (SizeType i = 0; i < clients.Size(); i++)
             {
                 string name = clients[i]["name"].GetString();
-                string term = clients[i]["term"].GetString();
+                string term = clients[i].HasMember("term") ? clients[i]["term"].GetString() : "";
+                string home = clients[i].HasMember("home") ? clients[i]["home"].GetString() : "";
                 
-                printf("name=%s term=%s\n", name.c_str(), term.c_str());
+                printf("name=%s term=%s home=%s\n", name.c_str(), term.c_str(), home.c_str());
                 
                 // add port to client map
                 client_t & client = client_map[name];
-                client.init(-1/*fd*/, name, root_path, term);
+                client.init(-1/*fd*/, name, home, term);
             }
         }
         
@@ -386,7 +388,7 @@ int main()
             if((client != -1) && (fd != client))
                 close(client);
 
-            client.init(fd, client_name, root_path, ""/*term*/);
+            client.init(fd, client_name, ""/*home*/, ""/*term*/);
         }
         else // determine which client & process received data
         {

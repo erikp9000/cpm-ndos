@@ -192,19 +192,38 @@ JSON format.
 
     { 
       "root": "cpm",
+      "fileuser": "nobody",
+      "filegroup": "nogroup",
+      "shelluser": "pi",
       "path": ["/dri", "/bin", "/microsoft"],
       "serial": [
-        { "port": "/dev/ttyAMA0", "baud": 9600 },
+        { "port": "/dev/ttyAMA0", "baud": 9600, "term": "ansi", "home": "altair" },
         { "port": "/dev/ttyUSB0", "baud": 19200 },
+      ],
+      "clients": [
+        { "name": "ALTAIR", "term" : "ansi" },
+        { "name": "KAYPRO2", "term": "kaypro2", "home": "kaypro" },
+        { "name": "TRS80", "term": "trs4", "home": "trs80" },
+        { "name": "OTRONA", "term": "", "home": "otrona" }
       ]
     }
 
- - root - Sets the root path for all clients
- - path - Sets the search path for open file so that clients can access programs
+ - root - Root path for all clients
+ - fileuser - User account used to create and access files
+ - filegroup - Group used to create and access files
+ - shelluser - User account for shell
+ - path - Search path for open file so that clients can access programs
    on the file server which are not present in the current working directory
- - serial - Sets the list of serial ports that ndos-srv will monitor for client
-   activity
- - ndos-srv also monitors for connections on TCP port 8234
+ - serial - List of serial ports to monitor for client activity
+   - port - Path to the serial port
+   - baud - Baud rate for this serial port (hardcoded to 8N1)
+   - term - Default terminal for shell
+   - home - Home directory for this serial port on the server
+ - clients - Configures USR-TCP232-302 clients connecting to port 8234
+   - name - Client computer name in DNS (can be IP address instead)
+   - term - Default terminal for shell
+   - home - Home directory for this client on the server
+   
  
 ## NDOS Protocol
 
