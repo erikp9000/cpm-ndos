@@ -23,6 +23,7 @@
 const int MAX_FILENAME_LEN = 11;
 const time_t FILE_TIMEOUT = 5*60;
 
+const char* BAD_DIRECTORY = "Bad directory";
 
 client_t::client_t()
 {
@@ -993,6 +994,42 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 }
 
 
+bool client_t::getsafepath(string& new_dir, bool mkdir)
+{
+    string tmp_dir = new_dir; // don't change unless successful
+    string mkdir_name;
+    bool retval = false; // prepare for failure
+   
+    // handle reference to root '/'
+    if(tmp_dir[0] == '/') tmp_dir = root_path + tmp_dir;
+    else tmp_dir = m_cwd + "/" + tmp_dir;
+
+    if(mkdir)
+    {
+        mkdir_name = tmp_dir.substr(tmp_dir.find_last_of("/"));
+        tmp_dir = tmp_dir.substr(0, tmp_dir.find_last_of("/") + 1);
+    }
+    
+    // try to open the directory
+    char* path = realpath(tmp_dir.c_str(), NULL);
+    if(path)
+    {
+        // is this directory under the root_path?
+        if((strlen(path) >= root_path.length()) &&
+           (0==strncmp(path, root_path.c_str(), root_path.length()))
+          )
+        {
+            tmp_dir = path + (mkdir ? mkdir_name : "");
+            printf("getsafepath '%s' -> '%s'\n", new_dir.c_str(), tmp_dir.c_str());
+            new_dir = tmp_dir; // yep. select the new path.
+            retval = true;  // signal success
+        }
+        free(path);
+    }
+    
+    return retval;
+}
+
 // Inputs:
 //   1-byte command
 //   n-byte directory
@@ -1004,14 +1041,13 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2+128);
-    string old_path = m_cwd; // remember current working directory
 
 //    for(size_t i=0 ; i<msg.size() ; ++i)
 //        printf("%02x ", msg[i]);
 //    printf("\n");
 
     resp[0] = resp[0] + 1; // response code
-    resp[1] = 0xff; // prepare for failure
+    resp[1] = 0; // prepare for success
 
     string new_dir((char*)&msg[1], msg.size() - 1);
     while(new_dir[0] == ' ')
@@ -1021,27 +1057,12 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
     for(size_t i=0 ; i<new_dir.length() ; ++i)
         new_dir[i] = tolower(new_dir[i]);
 
-    if(new_dir[0] == '/') new_dir = root_path + new_dir;
-    else new_dir = m_cwd + "/" + new_dir;
+    printf("change_dir '%s'\n", new_dir.c_str());
 
-    printf("change_dir new_dir='%s'\n", new_dir.c_str());
-
-    // try to open the directory
-    char* path = realpath(new_dir.c_str(), NULL);
-    if(path)
-    {
-        // is this directory under the root_path?
-        if((strlen(path) >= root_path.length()) &&
-           (0==strncmp(path, root_path.c_str(), root_path.length()))
-          )
-        {
-            // yep. select the new path.
-            m_cwd = path;
-            resp[1] = 0; // success
-        }
-        free(path);
-    }
-
+    // get new path relative to m_cwd and limited by root_path
+    if(getsafepath(new_dir))
+        m_cwd = new_dir;
+    
     // copy new directory into response
     if(m_cwd.length() < 128)
 		sprintf((char*)&resp[2], m_cwd.c_str());
@@ -1079,9 +1100,9 @@ msgbuf_t client_t::make_dir(const msgbuf_t& msg)
     for(size_t i=0 ; i<new_dir.length() ; ++i)
 	new_dir[i] = tolower(new_dir[i]);
 
-    printf("make_dir new_dir='%s'\n", new_dir.c_str());
-
-    if(new_dir.length())
+    printf("make_dir '%s'\n", new_dir.c_str());
+    
+    if(new_dir.length() && getsafepath(new_dir, true/*mkdir*/))
     {
         resp[1] = mkdir(new_dir.c_str(), 0755/*mode*/);
         if(0xff == resp[1])
@@ -1091,6 +1112,12 @@ msgbuf_t client_t::make_dir(const msgbuf_t& msg)
             resp.resize(resp.size() + strlen(errs));
             memcpy(&resp[2], errs, strlen(errs));
         }
+    }
+    else  // bad directory
+    {
+        resp[1] = 0xff;
+        resp.resize(resp.size() + strlen(BAD_DIRECTORY));
+        memcpy(&resp[2], BAD_DIRECTORY, strlen(BAD_DIRECTORY));        
     }
 
     return resp;
@@ -1122,9 +1149,9 @@ msgbuf_t client_t::remove_dir(const msgbuf_t& msg)
     for(size_t i=0 ; i<new_dir.length() ; ++i)
 	new_dir[i] = tolower(new_dir[i]);
 
-    printf("remove_dir new_dir='%s'\n", new_dir.c_str());
+    printf("remove_dir '%s'\n", new_dir.c_str());
 
-    if(new_dir.length())
+    if(getsafepath(new_dir) && new_dir.length())
     {
         resp[1] = rmdir(new_dir.c_str());
         if(0xff == resp[1])
@@ -1134,6 +1161,12 @@ msgbuf_t client_t::remove_dir(const msgbuf_t& msg)
             resp.resize(resp.size() + strlen(errs));
             memcpy(&resp[2], errs, strlen(errs));
         }
+    }
+    else  // bad directory
+    {
+        resp[1] = 0xff;
+        resp.resize(resp.size() + strlen(BAD_DIRECTORY));
+        memcpy(&resp[2], BAD_DIRECTORY, strlen(BAD_DIRECTORY));        
     }
 
     return resp;

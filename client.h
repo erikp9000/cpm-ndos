@@ -147,6 +147,8 @@ protected:
     void send_stdout(const char *fmt, ...);
     string get_stdout();
 
+    bool getsafepath(string& new_dir, bool mkdir=false);
+    
 private:
     void reset_dir();
     int get_file_handle(const msgbuf_t& msg);
