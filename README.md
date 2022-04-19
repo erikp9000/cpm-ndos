@@ -5,8 +5,13 @@ program for CP/M 2.2 (Intel 8080) which adds a network drive (P:) over a serial 
 serial port is connected to a Linux computer which runs a service to convert 
 the NDOS requests to Linux calls.
 
-v1.2a Add TRS 80 NIOS for Model 4/4P/4D Montezuma CP/M. Add shell command (NSH) to 
-enable remote client to login to a shell on the server or execute server commands.
+v1.2a Add TRS 80 NIOS for Model 4/4P/4D Montezuma CP/M. Add Otrona Attache NIOS. 
+Add shell command (NSH) to enable remote client to login to a shell on the server 
+or execute server commands. Add Linux terminfo file, terminals.inf, with terminal
+escape codes for Kaypro, TRS-80, and Otrona Attache. Improvements in socket
+management for compatiblity with Windows sockets & the MAME emulator. Fixed current
+working directory management to support multiple clients and ensure the clients
+cannot change out of the 'root' folder specified in the config file.
 
 v1.2 Dispenses with the FCB address as a file reference. On file open and file create, 
 the server returns its file handle to the client who stores it in the FCB disk allocation 
@@ -109,6 +114,9 @@ supported hardware.
 
   - NIOS-T80.ASM is configured to use the serial port on a TRS 80 Model 4
     at 19.2Kbps. It should also work on the TRS 80 4/4P/4D.
+    
+  - NIOS-OTR.ASM is configured to use the 'J302 Serial Port A' on the Otrona Attache
+    at 19.2Kbps.
 
 ### Porting Considerations
 
@@ -185,6 +193,10 @@ server-side of the NDOS Protocol. It supports multiple clients (CP/M machines).
 	(on TCP port 8234) in which the Converter connects to the configured server 
 	name/IP address and sends/receives serial bytes over the TCP socket. 
 	Identity and Keepalive packets are NOT supported.
+  - MAME Emulator bitbanger connected through null_modem to a serial port. For
+    example `mame <system> -rs232a null_modem -bitb socket.<host>:8234` where 
+    <system> is the emulated system type and <host> is the hostname or IP
+    address where ndos-srv is running.
 	
 ### Configuration File
 
@@ -204,7 +216,7 @@ JSON format.
         { "name": "ALTAIR", "term" : "ansi" },
         { "name": "KAYPRO2", "term": "kaypro2", "home": "kaypro" },
         { "name": "TRS80", "term": "trs4", "home": "trs80" },
-        { "name": "OTRONA", "term": "", "home": "otrona" }
+        { "name": "OTRONA", "term": "attache", "home": "otrona" }
       ]
     }
 

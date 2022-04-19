@@ -6,6 +6,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <malloc.h>
+#include <unistd.h>
+#include <time.h>
 
 #include <termios.h>
 #include <unistd.h>
@@ -18,7 +20,31 @@
 #include <utmp.h>
 #include <pwd.h>
 
+#include <iostream>
+#include <sstream>
+#include <bitset>
+#include <iomanip>
+
 #undef DEBUG
+
+uint32_t getTick() 
+{
+    struct timespec ts;
+    unsigned theTick = 0U;
+    clock_gettime( CLOCK_MONOTONIC, &ts );
+    theTick  = ts.tv_nsec / 1000000;
+    theTick += ts.tv_sec * 1000;
+    return theTick;
+}
+
+std::string hexStr(unsigned char* data, int len)
+{
+    std::stringstream ss;
+    ss << std::hex;
+    for(int i=0;i<len;++i)
+        ss << std::setw(2) << std::setfill('0') << (int)data[i];
+    return ss.str();
+}
 
 const int MAX_FILENAME_LEN = 11;
 const time_t FILE_TIMEOUT = 5*60;
@@ -37,6 +63,8 @@ client_t::client_t()
     m_de = NULL;
         
     init(-1/*fd*/, ""/*name*/, ""/*home_dir*/, "dumb"/*term*/);
+    
+    m_lasttime = 0;
 }
 
 client_t::~client_t()
@@ -146,12 +174,21 @@ bool client_t::check_fds(fd_set& readfds)
 void client_t::recv_request()
 {
     do {
-#ifdef DEBUG		
-		printf("recv_request (%d) entered\n", m_fd);
-#endif
+        // Communications breaks can lead to orphaned data which would leave
+        // the buffer out-of-sync forever. Detect and discard orphaned data here.
+        // 20 mS is fine for hardwired connections but 100 is better for WiFi
+        if(getTick() - m_lasttime > 100)
+        {
+            m_offset = 0;
+            m_cnt = 1;
+        }
+        m_lasttime = getTick();
+        
         int rdlen = read(m_fd, m_buffer + m_offset, m_cnt - m_offset);
 #ifdef DEBUG
 		printf("recv_request (%d) read returned (%d)\n", m_fd, rdlen);
+        string hexbytes = hexStr(&m_buffer[m_offset], rdlen);
+        printf("%s\n", hexbytes.c_str());
 #endif
 
         if(rdlen < 0)
@@ -159,8 +196,8 @@ void client_t::recv_request()
             // If there's no data to read, just return
             if(EAGAIN == errno)
             {
-                m_offset = 0;
-                m_cnt = 1;
+                // Don't know why, but Windows triggers this condition alot especially over WiFi.
+                //printf("recv_request (%d) read error: %d\n", m_fd, errno);
                 return;
             }
 
@@ -171,11 +208,9 @@ void client_t::recv_request()
         }
         else if(rdlen == 0)
         {
-            // reset buf for next message (serial)
-            // if no characters, this isn't a timeout
-            if(m_offset) printf("recv_request (%d) read timeout m_offset=%d m_cnt=%d\n", m_fd, m_offset, m_cnt);
-            m_offset = 0;
-            m_cnt = 1;
+            // if no characters, the socket was closed by the other side
+            printf("recv_request (%d) socket closed: %s\n", m_fd, strerror(errno));
+            close_fds();
             return;
         }
         else
@@ -195,18 +230,13 @@ void client_t::recv_request()
                 unsigned char chksum = 0;
 
                 // validate checksum
-#ifdef DEBUG				
-                printf("msg :");
-#endif
                 for(int i=0 ; i < m_cnt ; ++i)
                 {
-#ifdef DEBUG				
-                    printf("%02x ", m_buffer[i]);
-#endif
                     chksum += m_buffer[i];
                 }
-#ifdef DEBUG				
-                printf(" chksum=%02x\n", chksum);
+#ifdef DEBUG
+                string hexbytes = hexStr(&m_buffer[0], m_cnt);
+                printf("msg: %s chksum=%02x\n", hexbytes.c_str(), chksum);
 #endif
 
                 if((0 == chksum) && (m_cnt > 2)) 
@@ -220,12 +250,8 @@ void client_t::recv_request()
                 else
                 {
                     printf("recv_request (%d) checksum failure\n", m_fd);
-                    for(int i=0 ; i < m_cnt ; ++i)
-                    {
-                        printf("%02x ", m_buffer[i]);
-                        if(i % 16 == 15) printf("\n");
-                    }
-                    printf("\n");
+                    string hexbytes = hexStr(&m_buffer[0], m_cnt);
+                    printf("msg: %s chksum=%02x\n", hexbytes.c_str(), chksum);
                 }
 
                 // reset for next message
@@ -242,9 +268,6 @@ void client_t::send_resp(const msgbuf_t &resp)
 {
     msgbuf_t cmd = resp; // make copy so we can insert LEN and CHK
 
-#ifdef DEBUG				
-    printf("response len=%02x: ", cmd.size());
-#endif
     if(cmd.size())
     {
         unsigned char chksum = 0;
@@ -254,20 +277,15 @@ void client_t::send_resp(const msgbuf_t &resp)
         // compute chksum and push to end of resp
         for(int i=0 ; i<cmd.size() ; ++i)
         {
-#ifdef DEBUG				
-            printf("%02x ", cmd[i]);
-#endif
             chksum += cmd[i];
         }
         cmd.push_back(~chksum + 1);
-#ifdef DEBUG				
-        printf("%02x ", cmd[cmd.size()-1]);
-#endif
         write(m_fd, cmd.data(), cmd.size());
         tcdrain(m_fd);    // delay for output
     }
-#ifdef DEBUG				
-    printf("\n");
+#ifdef DEBUG
+    string hexbytes = hexStr(cmd.data(), cmd.size());
+    printf("resp len=%02x: %s\n", cmd.size(), hexbytes.c_str());
 #endif
 }
 
@@ -436,7 +454,8 @@ static string cpm2linux(const char* str, size_t len)
 //    m_dir points to the opened dircectory
 //    m_de points to the directory entry
 //    m_srch_filter is the search filter from the client
-//    m_local_filename is the matching local filename (may include path)
+//    m_local_filename is the matching local filename
+//    m_full_path is the full pathname of the local file
 //   
 msgbuf_t client_t::find_first(const msgbuf_t& msg)
 {
@@ -447,7 +466,7 @@ msgbuf_t client_t::find_first(const msgbuf_t& msg)
 #endif
     m_dir = opendir(m_cwd.c_str());
 
-	// TODO Improve on this...
+	// TODO Improve on this using the 20-second timeout in main socket loop
 	// CP/M isn't good about closing files that were only read.
 	// So if a file handle was opened 'a long time ago' and not 
 	// recently accessed, we will close it here.
@@ -516,8 +535,8 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
         // search for a file that matches filter
         string name;
         struct stat details;
-		string pathname = m_cwd + "/" + m_local_filename;
-        stat(pathname.c_str(), &details);
+		m_full_path = m_cwd + "/" + m_local_filename;
+        stat(m_full_path.c_str(), &details);
 
         if(S_ISDIR(details.st_mode))
         {
@@ -616,7 +635,7 @@ msgbuf_t client_t::find_next(const msgbuf_t& msg)
     } while (m_de);
 
     // Return the search parameter when no files match
-    m_local_filename = cpm2linux(m_srch_filter.c_str(), MAX_FILENAME_LEN);
+    m_full_path = m_local_filename = cpm2linux(m_srch_filter.c_str(), MAX_FILENAME_LEN);
 
     // Close directory and clear m_srch_filter
     reset_dir();
@@ -658,7 +677,6 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
 			resp = find_first(msg);
 			if(resp[3] != 0xff) 
 			{
-				m_local_filename = m_cwd + "/" + m_local_filename;
 				break; // we found the file!
 			}
 		}
@@ -672,7 +690,7 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
         // First check if this file is already open
         for(fcb_map_t::iterator it = m_fcbs.begin() ; it != m_fcbs.end() ; ++it)
         {
-            if(it->second.local_filename() == m_local_filename)
+            if(it->second.local_filename() == m_full_path)
             {
                 // Close the handle to prevent issues with delete and rename
                 m_fcbs.erase(it);
@@ -681,32 +699,31 @@ msgbuf_t client_t::open_file(const msgbuf_t& msg)
         }
         
         // Open the file
-        hdl = open(m_local_filename.c_str(), O_RDWR);
+        hdl = open(m_full_path.c_str(), O_RDWR);
 	}
-
-    printf("open_file(%d) '%s' fcb_addr=0x%04X ", hdl, m_local_filename.c_str(), fcb_addr);
 
     if(-1 == hdl)
     {
-		if(0 == resp[3]) printf("%s\n", strerror(errno));
-        else printf("not found\n");
+        if(0 != resp[3]) errno = ENOENT; // file not found
 		resp[1] = 0xFF;
 		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
     }
     else
     {
-        printf("success\n");
 		resp[1] = hdl;
 		resp[2] = ~hdl + 1; // 2's complement
         resp[3] = 0; // success
 		fcb_t& fcb = m_fcbs[hdl];
-        fcb.set(hdl, m_local_filename);
+        fcb.set(hdl, m_full_path);
 #ifdef BACKCOMPAT
         // v1.0 and 1.1 compatibility
         m_fcb_to_hdl[fcb_addr] = hdl;
 #endif        
     }
+
+    printf("open_file(%d) '%s' fcb_addr=0x%04X %s\n", hdl, m_full_path.c_str(), fcb_addr,
+        0==resp[3] ? "success" : strerror(errno));
 
     reset_dir();
     
@@ -727,8 +744,6 @@ msgbuf_t client_t::close_file(const msgbuf_t& msg)
     int file_handle = get_file_handle(msg);
     fcb_t& fcb = m_fcbs[file_handle];
 
-    printf("close_file(%d) '%s'\n", fcb.hdl(), fcb.local_filename().c_str());
-
     // close the file handle and remove FCB
 	m_fcbs.erase(fcb.hdl());
 
@@ -739,6 +754,9 @@ msgbuf_t client_t::close_file(const msgbuf_t& msg)
     resp[0] += 1; // set response code
     // file handle is set from msg
     resp[3] = 0; // success, we never return an error
+
+    printf("close_file(%d) '%s' %s\n", fcb.hdl(), fcb.local_filename().c_str(),
+        0==resp[3] ? "success" : strerror(errno));
     
     return resp;
 }
@@ -878,24 +896,20 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
     resp[1] = msg[1];
     resp[2] = msg[2];
 
-    string filename = cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
+    string filename = m_cwd + "/" + cpm2linux((const char*)&msg[3], MAX_FILENAME_LEN);
    
     // creat() opens the file with O_WRONLY which breaks Random File Access!
     hdl = open(filename.c_str(), O_CREAT | O_TRUNC | O_RDWR,
         S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
-    printf("create_file(%d) '%s' fcb_addr=0x%04X ", hdl, filename.c_str(), fcb_addr);
-
     if(-1 == hdl)
     {
-		printf("%s\n", strerror(errno));
 		resp[1] = 0xFF;
 		resp[2] = 0xFF;
         resp[3] = 0xFF; // error
     }
     else
     {
-        printf("success\n");
 		resp[1] = hdl;
 		resp[2] = ~hdl + 1; // 2's complement
         resp[3] = 0; // success
@@ -906,6 +920,9 @@ msgbuf_t client_t::create_file(const msgbuf_t& msg)
         m_fcb_to_hdl[fcb_addr] = hdl;
 #endif        
     }
+
+    printf("create_file(%d) '%s' fcb_addr=0x%04X %s\n", hdl, filename.c_str(), fcb_addr,
+        0==resp[3] ? "success" : strerror(errno));
 
     return resp;
 }
@@ -930,19 +947,18 @@ msgbuf_t client_t::delete_file(const msgbuf_t& msg)
    
     while(0 == resp[3]) // on success, try to delete local filename
     {
-        printf("delete_file '%s' ", m_local_filename.c_str());
-        retval = unlink(m_local_filename.c_str());
+        retval = unlink(m_full_path.c_str());
         
-        if(-1 == retval) break; // quit on an error
+        printf("delete_file '%s' %s\n", m_full_path.c_str(), 
+            -1 != retval ? "success" : strerror(errno));
         
-        printf("success\n");
+        if((-1 == retval) && (EISDIR != errno)) break; // quit on an error
+        
         resp = find_next(msg);
     }
 
     if(-1 == retval)
     {
-        if(0 == resp[3]) printf("%s\n", strerror(errno));
-        else printf("not found\n");
         resp[3] = 0xFF; // error
     }
     else
@@ -970,10 +986,8 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 {
     msgbuf_t resp = find_first(msg);
 
-    string oldfn = m_local_filename;
-    string newfn = cpm2linux((const char*)&msg[14], MAX_FILENAME_LEN);
-
-    printf("rename_file '%s'-> '%s' ", oldfn.c_str(), newfn.c_str());
+    string oldfn = m_full_path;
+    string newfn = m_cwd + "/" + cpm2linux((const char*)&msg[14], MAX_FILENAME_LEN);
 
     resp.resize(4);  // discard filename and file size
 
@@ -981,14 +995,15 @@ msgbuf_t client_t::rename_file(const msgbuf_t& msg)
 
     if(-1 == retval)
     {
-		printf("%s\n", strerror(errno));
         resp[3] = 0xFF; // error
     }
     else
     {
-        printf("success\n");
         resp[3] = 0; // success
     }
+
+    printf("rename_file '%s'-> '%s' %s\n", oldfn.c_str(), newfn.c_str(), 
+        0==resp[3] ? "success" : strerror(errno));
 
     return resp;
 }
@@ -1042,10 +1057,6 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2+128);
 
-//    for(size_t i=0 ; i<msg.size() ; ++i)
-//        printf("%02x ", msg[i]);
-//    printf("\n");
-
     resp[0] = resp[0] + 1; // response code
     resp[1] = 0; // prepare for success
 
@@ -1085,10 +1096,6 @@ msgbuf_t client_t::change_dir(const msgbuf_t& msg)
 msgbuf_t client_t::make_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2);
-
-//    for(size_t i=0 ; i<msg.size() ; ++i)
-//        printf("%02x ", msg[i]);
-//    printf("\n");
 
     resp[0] = resp[0] + 1; // response code
 
@@ -1135,10 +1142,6 @@ msgbuf_t client_t::remove_dir(const msgbuf_t& msg)
 {
     msgbuf_t resp(2);
 
-//    for(size_t i=0 ; i<msg.size() ; ++i)
-//        printf("%02x ", msg[i]);
-//    printf("\n");
-
     resp[0] = resp[0] + 1; // response code
 
     string new_dir((char*)&msg[1], msg.size() - 1);
@@ -1183,13 +1186,6 @@ msgbuf_t client_t::echo(const msgbuf_t& msg)
 {
     msgbuf_t resp = msg;
 	resp[0] += 1;
-    //printf("echo cnt=%d\n  ", msg.size()-1);
-    //for(size_t i=1 ; i<msg.size() ; ++i)
-    //{
-    //    printf("%02x ", msg[i]);
-    //    if((i - 1) % 16 == 15) printf("\n  ");
-    //}
-    //printf("\n");
     return resp;
 }
 
@@ -1267,13 +1263,6 @@ msgbuf_t client_t::shell(const msgbuf_t& msg)
     string ret_bytes = get_stdout();
     if(ret_bytes.length())
     {
-        //printf("return bytes '%s'\n", ret_bytes.c_str());
-        //for(int i=0 ; i<ret_bytes.length() ; ++i)
-        //{
-        //    printf("%02X ", ret_bytes[i]);
-        //    if(0 == (i+1) % 16) printf("\n");
-        //}
-        //printf("\n");
         resp.insert(resp.end(), ret_bytes.begin(), ret_bytes.end());
         resp[1] = 1;    // stdout bytes available
     }

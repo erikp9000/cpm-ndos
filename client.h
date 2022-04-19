@@ -148,7 +148,7 @@ protected:
     string get_stdout();
 
     bool getsafepath(string& new_dir, bool mkdir=false);
-    
+
 private:
     void reset_dir();
     int get_file_handle(const msgbuf_t& msg);
@@ -179,7 +179,9 @@ private:
     DIR* m_dir;                     // pointer to directory
     struct dirent *m_de;            // pointer to directory entry
     std::string m_srch_filter;      // search filter from client
+    std::string m_full_path;        // full pathname of m_local_filename
     std::string m_local_filename;   // local filename matching search filter
+    uint32_t m_lasttime;
 };
 
 typedef std::map<std::string, client_t> client_map_t;

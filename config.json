@@ -20,6 +20,6 @@
     { "name": "ALTAIR", "term" : "ansi" },
     { "name": "KAYPRO2", "term": "kaypro2", "home": "kaypro" },
     { "name": "TRS80", "term": "trs4", "home": "trs80" },
-    { "name": "OTRONA", "term": "", "home": "otrona" }
+    { "name": "OTRONA", "term": "attache", "home": "otrona" }
   ]
 }
