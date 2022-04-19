@@ -195,7 +195,7 @@ server-side of the NDOS Protocol. It supports multiple clients (CP/M machines).
 	Identity and Keepalive packets are NOT supported.
   - MAME Emulator bitbanger connected through null_modem to a serial port. For
     example `mame <system> -rs232a null_modem -bitb socket.<host>:8234` where 
-    <system> is the emulated system type and <host> is the hostname or IP
+    `<system>` is the emulated system type and `<host>` is the hostname or IP
     address where ndos-srv is running.
 	
 ### Configuration File
