@@ -76,6 +76,8 @@ loop1:
         ; check for timeout
 	ora a
 	jnz timeout
+        lda 3
+        sta tocnt               ; reset timeout counter
 
         ; check for no data (0)
         lda buffer+2            ; status
@@ -127,7 +129,11 @@ nondos:	mvi c,prnstr
         jmp quit
 
 	; Timeout contacting server
-timeout:mvi c,prnstr
+timeout:lda tocnt
+        dcr a
+        sta tocnt
+        jnz loop1
+        mvi c,prnstr
 	lxi d,toerr
 	call bdosv
         jmp quit
@@ -156,6 +162,8 @@ serr:	db 'Directory not found',cr,lf,'$'
 
 usage:	db 'Press ENTER when drive motors stop $'
 crlf:	db cr,lf,'$'
+
+tocnt:  db 3
 
 ;; NDOS request message
 msgbuf: db 0		; LEN
