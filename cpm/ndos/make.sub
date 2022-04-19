@@ -8,6 +8,8 @@ rmac nios-kp2 $$pz sz
 link nios-kp2[os]
 rmac nios-t80 $$pz sz
 link nios-t80[os]
+rmac nios-otr $$pz sz
+link nios-otr[os]
 era *.rel
 era *.sym
 mac ldndos $$pz sz
